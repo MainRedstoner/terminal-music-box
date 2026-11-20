@@ -68,7 +68,10 @@ class WavBackend(Backend):
 
 
 class _ProcBackend(Backend):
-    blocking = True
+    # The mixer paces itself to wall-clock time, so audio is not pre-buffered
+    # seconds ahead inside the pipe.  Blocking on a full pipe still provides
+    # back-pressure if the player process falls behind.
+    blocking = False
 
     def __init__(self, argv):
         self.argv = argv
@@ -76,14 +79,21 @@ class _ProcBackend(Backend):
 
     def open(self, sr, ch):
         self.proc = subprocess.Popen(self.argv, stdin=subprocess.PIPE,
-                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                     bufsize=0)
 
     def write(self, pcm):
-        if self.proc and self.proc.stdin:
+        if self.proc is None or self.proc.stdin is None:
+            return
+        view = memoryview(pcm)
+        while view:
             try:
-                self.proc.stdin.write(pcm)
+                n = self.proc.stdin.write(view)
             except (BrokenPipeError, OSError):
-                pass
+                return
+            if not n:
+                return
+            view = view[n:]
 
     def close(self):
         if self.proc:
@@ -111,15 +121,24 @@ class PulseBackend(_ProcBackend):
     name = "pulse"
 
     def __init__(self, sr=44100, ch=1):
-        super().__init__(["paplay", "--raw", "--format=s16le",
-                          "--rate=%d" % sr, "--channels=%d" % ch])
+        # paplay exposes no latency knob; pacat lets us request a short server
+        # buffer, which is what keeps WSLg (RDP-forwarded PulseAudio) responsive.
+        pacat = shutil.which("pacat")
+        if pacat:
+            argv = [pacat, "--playback", "--raw", "--format=s16le",
+                    "--rate=%d" % sr, "--channels=%d" % ch,
+                    "--latency-msec=30"]
+        else:
+            argv = ["paplay", "--raw", "--format=s16le",
+                    "--rate=%d" % sr, "--channels=%d" % ch]
+        super().__init__(argv)
 
 
 class WinmmBackend(Backend):
     blocking = True
     name = "winmm"
 
-    def __init__(self, nbuf=10, chunk=512):
+    def __init__(self, nbuf=12, chunk=512, poll_ms=2):
         import ctypes as ct
         from ctypes import wintypes as wt
         self._ct = ct
@@ -128,6 +147,10 @@ class WinmmBackend(Backend):
         self.k32 = ct.windll.kernel32
         self.nbuf = nbuf
         self.chunk = chunk
+        # Some WaveOut drivers (notably USB audio) never signal the callback
+        # event, so waiting on it with a long timeout stalls the writer and the
+        # device runs dry between refills.  Poll the completion flags instead.
+        self.poll_ms = poll_ms
         self._hwo = None
         self._event = None
         self._headers = []
@@ -178,9 +201,10 @@ class WinmmBackend(Backend):
         WHDR_DONE = 0x1
         for i, hdr in enumerate(self._headers):
             if (hdr.dwFlags & WHDR_DONE) and i not in self._free:
-                self.winmm.waveOutUnprepareHeader(self._hwo, ct.byref(hdr), ct.sizeof(hdr))
-                hdr.dwFlags = 0
-                self._free.append(i)
+                rc = self.winmm.waveOutUnprepareHeader(self._hwo, ct.byref(hdr), ct.sizeof(hdr))
+                if rc == 0:
+                    hdr.dwFlags = 0
+                    self._free.append(i)
 
     def write(self, pcm):
         ct = self._ct
@@ -192,7 +216,7 @@ class WinmmBackend(Backend):
                 self._reclaim()
                 if self._free:
                     break
-                self.k32.WaitForSingleObject(self._event, 200)
+                self.k32.WaitForSingleObject(self._event, self.poll_ms)
             idx = self._free.popleft()
             hdr = self._headers[idx]
             buf = self._buffers[idx]
@@ -207,6 +231,7 @@ class WinmmBackend(Backend):
                 self.winmm.waveOutUnprepareHeader(self._hwo, ct.byref(hdr), ct.sizeof(hdr))
                 hdr.dwFlags = 0
                 self._free.append(idx)
+                return
 
     def close(self):
         ct = self._ct

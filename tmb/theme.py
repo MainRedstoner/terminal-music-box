@@ -75,7 +75,6 @@ ZH: Dict[str, str] = {
     "freeplay.prenatal_off": "胎教模式：关",
     "freeplay.prenatal_hint": "2 秒内按任意演奏键继续播放，否则暂停",
     "freeplay.no_song": "（默认列表第一首）",
-    "freeplay.sustain": "长按持续",
     "freeplay.timbre_line": "音色：{name}    ^X 切换音色",
     "freeplay.prenatal_song": "胎教模式：开 · 曲目：{title}",
     "freeplay.keyboard": "C 大调 · 三个八度",
@@ -117,8 +116,6 @@ ZH: Dict[str, str] = {
     "rhythm.grade": "评级",
     "rhythm.new_record": "新纪录！",
     "rhythm.press_any": "按任意键开始采样",
-    "rhythm.hold": "长按",
-    "rhythm.tap": "点按",
     "prenatal.title": "胎教模式",
 }
 
@@ -154,7 +151,6 @@ EN: Dict[str, str] = {
     "freeplay.prenatal_off": "Prenatal: OFF",
     "freeplay.prenatal_hint": "Press any play key within 2s to keep playing",
     "freeplay.no_song": "(default: first song)",
-    "freeplay.sustain": "hold to sustain",
     "freeplay.timbre_line": "Timbre: {name}    ^X switch",
     "freeplay.prenatal_song": "Prenatal: ON - Song: {title}",
     "freeplay.keyboard": "C major - 3 octaves",
@@ -197,8 +193,6 @@ EN: Dict[str, str] = {
     "rhythm.grade": "Grade",
     "rhythm.new_record": "New record!",
     "rhythm.press_any": "Press any key to begin sampling",
-    "rhythm.hold": "HOLD",
-    "rhythm.tap": "TAP",
     "prenatal.title": "Prenatal Mode",
 }
 

@@ -1,4 +1,4 @@
-"""Free play: keyboard voices, timbre cycling, sustain, prenatal mode, mouse."""
+"""Free play: keyboard voices, timbre cycling, prenatal mode, mouse."""
 from __future__ import annotations
 
 import unittest
@@ -15,9 +15,6 @@ except ImportError:
 
 class FreePlay(HeadlessCase):
     start_screen = "freeplay"
-
-    def sustain_mode(self):
-        self.cfg.timbre = "bit"
 
     def test_frame_shows_the_three_row_keyboard(self):
         th = self.app.theme
@@ -36,7 +33,6 @@ class FreePlay(HeadlessCase):
         self.assertEqual(self.engine.active(), 2)
 
     def test_every_key_of_the_21_key_keyboard_plays(self):
-        self.sustain_mode()
         self.assertEqual(len(KEY_MIDI), 21)
         for i, key in enumerate(KEY_MIDI):
             self.press(key, dt=0.001)
@@ -44,45 +40,30 @@ class FreePlay(HeadlessCase):
         self.assertEqual(len(self.screen.key_down), 21)
         self.advance(REPEAT_TIMEOUT + 0.1, dt=0.05)
         self.assertEqual(self.screen.key_down, {})
-        self.assertEqual(self.screen.voices, {})
+        self.assertEqual(self.engine.active(), 21)
 
-    def test_one_shot_timbre_does_not_track_a_sustain_voice(self):
+    def test_key_up_does_not_stop_a_playing_note(self):
         self.press("a")
-        self.assertEqual(self.engine.active(), 1)
-        self.assertEqual(self.screen.voices, {})
-        self.advance(REPEAT_TIMEOUT + 0.1, dt=0.05)
-        self.assertEqual(self.screen.key_down, {})
-        self.assertEqual(self.engine.active(), 1)
-
-    def test_sustain_note_on_then_key_up(self):
-        self.sustain_mode()
-        self.press("a")
-        vid = self.screen.voices["a"]
-        voice = self.engine._voices[vid]
-        self.assertTrue(voice._sustain)
-        self.assertEqual([loop for _, loop in voice._segments], [False, True])
         self.release("a")
-        self.assertEqual(self.screen.voices, {})
         self.assertEqual(self.screen.key_down, {})
+        self.assertEqual(self.engine.active(), 1)
+
+    def test_sustained_timbre_plays_a_fixed_length_one_shot(self):
+        self.cfg.timbre = "bit"
+        self.press("a")
+        voice = next(iter(self.engine._voices.values()))
+        self.assertFalse(voice._sustain)
         self.assertEqual([loop for _, loop in voice._segments], [False])
-        self.assertEqual(len(voice._segments[0][0]), len(voice._release))
+        self.release("a")
+        self.assertEqual(self.engine.active(), 1)
+        self.assertEqual(self.screen.key_down, {})
 
-    def test_sustain_released_by_repeat_timeout(self):
-        self.sustain_mode()
-        self.press("a")
-        vid = self.screen.voices["a"]
-        self.advance(REPEAT_TIMEOUT + 0.1, dt=0.05)
-        self.assertEqual(self.screen.voices, {})
-        self.assertEqual([loop for _, loop in self.engine._voices[vid]._segments], [False])
-
-    def test_auto_repeat_within_timeout_keeps_the_note_down(self):
-        self.sustain_mode()
+    def test_auto_repeat_does_not_retrigger(self):
         self.press("a")
         self.advance(0.15, dt=0.05)
         self.press("a")
         self.advance(0.15, dt=0.05)
-        self.assertIn("a", self.screen.voices)
-        self.assertTrue(self.screen.key_down["a"])
+        self.assertEqual(self.engine.active(), 1)
 
     def test_key_up_of_non_play_keys_is_safe(self):
         self.release("enter")
@@ -100,15 +81,6 @@ class FreePlay(HeadlessCase):
         for _ in range(11):
             self.press("ctrl+x")
         self.assertEqual(self.cfg.timbre, "harp")
-
-    def test_ctrl_x_releases_held_notes(self):
-        self.sustain_mode()
-        self.press("a")
-        vid = self.screen.voices["a"]
-        self.press("ctrl+x")
-        self.assertEqual(self.screen.voices, {})
-        self.assertEqual(self.screen.key_down, {})
-        self.assertEqual([loop for _, loop in self.engine._voices[vid]._segments], [False])
 
     def test_ctrl_t_starts_prenatal_with_default_song(self):
         self.press("ctrl+t")
@@ -169,7 +141,6 @@ class FreePlay(HeadlessCase):
         self.assertGreater(p.pos, 2.5)
 
     def test_prenatal_song_loops_after_it_finishes(self):
-        self.sustain_mode()
         self.press("ctrl+t")
         p = self.screen.player
         duration = p.song.duration
@@ -257,16 +228,15 @@ class FreePlay(HeadlessCase):
         self.click(x + 1, y, kind="release")
         self.assertEqual(self.screen.key_down, {})
 
-    def test_mouse_click_and_release_of_a_sustain_cap(self):
-        self.sustain_mode()
+    def test_mouse_click_and_release_of_a_sustained_timbre_cap(self):
+        self.cfg.timbre = "bit"
         x, y = self.find_label("[S]")
         self.click(x + 1, y)
-        vid = self.screen.voices["s"]
-        self.assertEqual([loop for _, loop in self.engine._voices[vid]._segments],
-                         [False, True])
+        voice = next(iter(self.engine._voices.values()))
+        self.assertFalse(voice._sustain)
         self.click(x + 1, y, kind="release")
-        self.assertEqual(self.screen.voices, {})
-        self.assertEqual([loop for _, loop in self.engine._voices[vid]._segments], [False])
+        self.assertEqual(self.screen.key_down, {})
+        self.assertEqual(self.engine.active(), 1)
 
     def test_mouse_click_on_timbre_button(self):
         self.click_label(self.app.theme.t("freeplay.btn_timbre"))

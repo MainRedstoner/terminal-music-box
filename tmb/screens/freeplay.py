@@ -1,4 +1,4 @@
-"""Free play: 21-key C-major keyboard, timbre cycling, sustain, prenatal mode."""
+"""Free play: 21-key C-major keyboard, timbre cycling, prenatal mode."""
 from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
@@ -19,7 +19,7 @@ KEY_MIDI: Dict[str, int] = {k: m for _, keys, midis in ROWS for k, m in zip(keys
 PLAY_KEYS = frozenset(KEY_MIDI)
 NOTE_NAMES = {0: "C", 2: "D", 4: "E", 5: "F", 7: "G", 9: "A", 11: "B"}
 
-REPEAT_TIMEOUT = 0.2   # POSIX sends no key-up: silence this long means released
+REPEAT_TIMEOUT = 0.2   # auto-repeat debounce: POSIX terminals have no key-up
 ACTIVITY_WINDOW = 2.0
 NOTE_DUR = 1.0
 CAP_W = 5
@@ -56,7 +56,6 @@ class FreePlayScreen(Screen):
         self.last_activity = 0.0
         self.prenatal = False
         self.key_down: Dict[str, bool] = {}
-        self.voices: Dict[str, int] = {}
         self.last_event: Dict[str, float] = {}
         self._mouse_key: Optional[str] = None
 
@@ -69,7 +68,7 @@ class FreePlayScreen(Screen):
     def exit(self) -> None:
         picking = self._picking
         self._picking = False
-        self._release_all()
+        self._clear_keys()
         if picking:
             return
         if self.player is not None:
@@ -118,27 +117,17 @@ class FreePlayScreen(Screen):
         if self.key_down.get(key, False):
             return
         self.key_down[key] = True
-        tid = self.config.timbre
-        midi = KEY_MIDI[key]
-        if synth.get_timbre(tid).sustain:
-            self.voices[key] = self.audio.note_on(tid, midi, 1.0)
-        else:
-            self.audio.play_note(tid, midi, NOTE_DUR, 1.0)
+        self.audio.play_note(self.config.timbre, KEY_MIDI[key], NOTE_DUR, 1.0)
 
     def _key_up(self, key: str) -> None:
         if key in KEY_MIDI:
             self._release(key)
 
     def _release(self, key: str) -> None:
-        vid = self.voices.pop(key, None)
-        if vid is not None:
-            self.audio.note_off(vid)
         self.key_down.pop(key, None)
         self.last_event.pop(key, None)
 
-    def _release_all(self) -> None:
-        for key in list(self.voices):
-            self._release(key)
+    def _clear_keys(self) -> None:
         self.key_down.clear()
         self.last_event.clear()
         self._mouse_key = None
@@ -149,7 +138,7 @@ class FreePlayScreen(Screen):
         tid = synth.next_timbre(self.config.timbre)
         self.config.timbre = tid
         self.config.save()
-        self._release_all()
+        self._clear_keys()
         if self.player is not None:
             self.player.set_timbre(tid)
 
@@ -230,8 +219,6 @@ class FreePlayScreen(Screen):
             lines.append((th.t("freeplay.prenatal_hint"), C.dim, False))
         else:
             lines.append((th.t("freeplay.prenatal_off"), C.gray, False))
-            if synth.get_timbre(tid).sustain:
-                lines.append((th.t("freeplay.sustain"), C.dim, False))
         return lines
 
     def _geometry(self, w: int) -> Tuple[int, int, int, int, int]:

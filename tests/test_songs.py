@@ -72,22 +72,13 @@ class Beatmaps(unittest.TestCase):
                 for rn, sn in zip(bm.notes, sorted(song.notes, key=lambda n: n.time)):
                     self.assertIn(rn.lane, range(6))
                     self.assertAlmostEqual(rn.time, sn.time + 2.0)
-                    if sn.dur >= 0.8:
-                        self.assertAlmostEqual(rn.hold, sn.dur)
-                    else:
-                        self.assertEqual(rn.hold, 0.0)
-                self.assertAlmostEqual(bm.duration, max(n.time + n.hold for n in bm.notes))
+                self.assertAlmostEqual(bm.duration, max(n.time for n in bm.notes))
 
-    def test_library_contains_both_taps_and_holds(self):
-        taps = holds = 0
+    def test_beatmaps_are_pure_tap_notes(self):
         for sid in songs.ORDER:
-            for n in songs.get_beatmap(sid).notes:
-                if n.hold > 0:
-                    holds += 1
-                else:
-                    taps += 1
-        self.assertGreater(taps, 0)
-        self.assertGreater(holds, 0)
+            with self.subTest(song=sid):
+                for n in songs.get_beatmap(sid).notes:
+                    self.assertFalse(hasattr(n, "hold"))
 
     def test_all_six_lanes_are_used_somewhere(self):
         used = set()

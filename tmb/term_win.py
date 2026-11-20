@@ -1,8 +1,8 @@
 """Windows console backend via ctypes (kernel32).
 
-Reads real console INPUT_RECORDs, so we get key-down AND key-up (used for
-sustain), unambiguous ESC, and native mouse events. Output uses VT processing
-so the same ANSI renderer works. No third-party dependencies.
+Reads real console INPUT_RECORDs, so we get key-down AND key-up (used to
+debounce auto-repeat), unambiguous ESC, and native mouse events. Output uses VT
+processing so the same ANSI renderer works. No third-party dependencies.
 """
 from __future__ import annotations
 

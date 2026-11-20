@@ -67,7 +67,7 @@ class TranslationCoverage(unittest.TestCase):
                 if name.endswith(".py"):
                     with open(os.path.join(dirpath, name), "r", encoding="utf-8") as f:
                         used |= set(USED.findall(f.read()))
-        self.assertGreater(len(used), 50)
+        self.assertGreater(len(used), 40)
         self.assertEqual(used - set(theme.ZH), set())
         self.assertEqual(used - set(theme.EN), set())
 

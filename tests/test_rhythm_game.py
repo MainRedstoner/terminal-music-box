@@ -1,12 +1,11 @@
-"""Rhythm gameplay: countdown, tap/hold judgment, pause, result, latency offset."""
+"""Rhythm gameplay: countdown, tap judgment, pause, result, latency offset."""
 from __future__ import annotations
 
 import unittest
 
 from tmb import songs
 from tmb.config import DEFAULT_KEYS
-from tmb.screens.rhythm_game import (COUNTDOWN, GOOD_WIN, HOLD_BONUS, HOLD_TOL,
-                                     PERFECT_WIN, REPEAT_TIMEOUT, RESULT_TAIL)
+from tmb.screens.rhythm_game import (COUNTDOWN, GOOD_WIN, PERFECT_WIN, RESULT_TAIL)
 
 try:
     from tests.helpers import HeadlessCase
@@ -38,11 +37,6 @@ class Game(HeadlessCase):
 
     def lane_key(self, note):
         return self.game.lane_keys[note.lane]
-
-    def hold_through(self, note, until, dt=0.01):
-        key = self.lane_key(note)
-        while self.game.song_time < until:
-            self.press(key, dt=dt)
 
 
 class Setup(Game):
@@ -179,72 +173,6 @@ class Judgment(Game):
         self.assertIn("0000303", self.frame)
 
 
-class Holds(Game):
-    song = "canon"
-
-    def first_hold(self):
-        n = self.game.notes[0]
-        self.assertGreater(n.hold, 0.0)
-        return n
-
-    def test_hold_completes_when_held_through_the_tail(self):
-        self.start_play()
-        n = self.first_hold()
-        self.at(n.time)
-        self.press(self.lane_key(n))
-        self.assertEqual(self.game.note_state[0], 1)
-        self.assertEqual(self.game.holding[n.lane], 0)
-        self.hold_through(n, n.time + n.hold + 0.05)
-        g = self.game
-        self.assertEqual(g.note_state[0], 3)
-        self.assertIsNone(g.holding[n.lane])
-        self.assertEqual(g.miss, 0)
-        self.assertEqual(g.score, 303 + HOLD_BONUS)
-
-    def test_hold_is_dropped_without_auto_repeat(self):
-        self.start_play()
-        n = self.first_hold()
-        self.at(n.time)
-        self.press(self.lane_key(n))
-        self.advance(REPEAT_TIMEOUT + 0.1, dt=0.05)
-        self.assertEqual(self.game.note_state[0], 2)
-        self.assertEqual(self.game.miss, 1)
-        self.assertIsNone(self.game.holding[n.lane])
-
-    def test_early_key_up_breaks_the_hold(self):
-        self.start_play()
-        n = self.first_hold()
-        self.at(n.time)
-        key = self.lane_key(n)
-        self.press(key)
-        self.hold_through(n, n.time + 0.2)
-        self.release(key)
-        self.assertEqual(self.game.note_state[0], 2)
-        self.assertEqual(self.game.miss, 1)
-
-    def test_key_up_inside_the_tail_tolerance_completes_the_hold(self):
-        self.start_play()
-        n = self.first_hold()
-        self.at(n.time)
-        key = self.lane_key(n)
-        self.press(key)
-        self.hold_through(n, n.time + n.hold - HOLD_TOL / 2)
-        self.release(key)
-        self.assertEqual(self.game.note_state[0], 3)
-        self.assertEqual(self.game.miss, 0)
-        self.assertEqual(self.game.score, 303 + HOLD_BONUS)
-
-    def test_hold_stays_active_before_the_tail(self):
-        self.start_play()
-        n = self.first_hold()
-        self.at(n.time)
-        self.press(self.lane_key(n))
-        self.hold_through(n, n.time + 0.3)
-        self.assertEqual(self.game.note_state[0], 1)
-        self.assertEqual(self.game.holding[n.lane], 0)
-        self.assertEqual(self.game.miss, 0)
-
-
 class PauseAndResult(Game):
     def test_escape_pauses_and_freezes_song_time(self):
         self.start_play()
@@ -323,10 +251,7 @@ class PauseAndResult(Game):
         g = self.game
         for n in g.notes:
             self.at(n.time)
-            key = self.lane_key(n)
-            self.press(key)
-            if n.hold > 0:
-                self.hold_through(n, n.time + n.hold + 0.02)
+            self.press(self.lane_key(n))
         self.run_until(lambda: g.state == "result", dt=0.05)
         self.assertEqual(g.miss, 0)
         self.assertEqual(g.perfect, len(g.notes))

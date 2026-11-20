@@ -1,7 +1,7 @@
 """Song / beatmap data model, a pausable song player, and the built-in library.
 
 A Song is a list of timed notes used by prenatal mode (auto playback). A
-Beatmap is a list of timed lane notes (tap / hold) used by the rhythm game.
+Beatmap is a list of timed lane notes used by the rhythm game.
 `beatmap_from_song` derives a playable chart from a melody. The library below
 is extended with more public-domain melodies.
 """
@@ -41,7 +41,6 @@ class Song:
 class RNote:
     time: float   # hit time in seconds
     lane: int     # 0..5
-    hold: float = 0.0  # >0 == hold note (seconds)
 
 
 @dataclass
@@ -54,7 +53,7 @@ class Beatmap:
     def duration(self) -> float:
         if not self.notes:
             return 0.0
-        return max(n.time + n.hold for n in self.notes)
+        return max(n.time for n in self.notes)
 
 
 def seq(items, bpm: float, start: float = 0.0, gate: float = 0.9) -> List[Note]:
@@ -69,7 +68,7 @@ def seq(items, bpm: float, start: float = 0.0, gate: float = 0.9) -> List[Note]:
     return out
 
 
-def beatmap_from_song(song: Song, lead_in: float = 2.0, hold_threshold: float = 0.8) -> Beatmap:
+def beatmap_from_song(song: Song, lead_in: float = 2.0) -> Beatmap:
     if not song.notes:
         return Beatmap(song.id, [])
     pitches = [n.midi for n in song.notes]
@@ -79,8 +78,7 @@ def beatmap_from_song(song: Song, lead_in: float = 2.0, hold_threshold: float = 
     for n in song.notes:
         lane = int((n.midi - lo) * 6 / (span + 1))
         lane = max(0, min(5, lane))
-        hold = n.dur if n.dur >= hold_threshold else 0.0
-        notes.append(RNote(n.time + lead_in, lane, hold))
+        notes.append(RNote(n.time + lead_in, lane))
     notes.sort(key=lambda r: r.time)
     return Beatmap(song.id, notes)
 

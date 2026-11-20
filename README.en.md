@@ -15,14 +15,14 @@ Implements [issue #1 — software development plan](https://github.com/MainRedst
   - **ASCII** — English only, plain buttons (`+-|`), maximum compatibility.
 - **Free Play** — a three-octave keyboard played with the letter keys, with all
   13 melodic Minecraft 1.20 note-block timbres (percussion excluded), synthesized
-  procedurally at runtime (no sample files). Some timbres sustain while a key is held.
+  procedurally at runtime (no sample files).
 - **Prenatal mode** — gentle auto-played melodies that keep playing only while you
-  press/hold a play key within a 2-second window; otherwise they pause.
-- **Rhythm Game** — vertically falling tap/hold notes, a judgment line,
+  press a play key within a 2-second window; otherwise they pause.
+- **Rhythm Game** — vertically falling notes, a judgment line,
   Perfect / Good / Miss judgment with effects, live score & combo, latency
   calibration, and rebindable keys.
 - **Audio** — a real-time polyphonic mixer streaming to ALSA (`aplay`) or
-  PulseAudio/PipeWire (`paplay`) on Linux, `winmm` on Windows, and WAV/null
+  PulseAudio/PipeWire (`pacat`/`paplay`) on Linux, `winmm` on Windows, and WAV/null
   backends for headless testing.
 
 ## Requirements
@@ -67,7 +67,6 @@ Z X C V B N M   — low   (C3..B3)
 - `^T` — toggle prenatal mode.
 - `^A` — choose the prenatal song.
 - `^Q`/`^D`/`^C`/`Esc` — back to menu.
-- Sustaining timbres (flute, bit, didgeridoo) ring while a key is held.
 - The on-screen keys and buttons are mouse-clickable.
 
 ### Prenatal mode
@@ -82,8 +81,7 @@ to keep it playing; otherwise it pauses, and the next key press resumes it.
   of 12 taps).
 - `Esc` pauses (only `Esc` during play); the pause menu offers quit or resume,
   and resuming runs a **3-second countdown** first.
-- Judgment: **Perfect** (±50 ms), **Good** (±120 ms), else **Miss**. Hold notes
-  must be held through their tail.
+- Judgment: **Perfect** (±50 ms), **Good** (±120 ms), else **Miss**.
 - Live score, combo, max combo, Perfect/Good/Miss counts and accuracy; the result
   screen shows a grade.
 
@@ -130,8 +128,8 @@ tmb/
   lone `Esc` disambiguated by a short timeout; `SIGWINCH` for resize.
 - **Windows**: `ReadConsoleInputW` gives key-down **and** key-up plus native mouse
   events; output uses VT processing so the same ANSI renderer works.
-- Key-release is unavailable on POSIX, so sustain/hold uses a repeat-timeout
-  heuristic that behaves consistently on both platforms.
+- Key-release is unavailable on POSIX, so auto-repeat events are debounced with a
+  short timeout instead of being treated as new presses.
 
 ## Tests
 
