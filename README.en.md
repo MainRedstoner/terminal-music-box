@@ -79,6 +79,8 @@ prenatal mode is on; `^A` picks the song at any time (defaults to the first:
 Twinkle Twinkle). Songs loop.
 
 ### Rhythm Game
+- The melody auto-plays for the whole run — each note sounds exactly as it
+  crosses the judgment line. Your taps are silent judgment only.
 - Default keys: `A S D J K L` (6 lanes), rebindable in **Key Config**
   (binding a key already in use swaps the two lanes).
 - **Latency Calibration** measures your input offset against a metronome (median

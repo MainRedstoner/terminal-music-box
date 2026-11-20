@@ -48,6 +48,7 @@ class Beatmap:
     song_id: str
     notes: List[RNote] = field(default_factory=list)
     difficulty: str = "Normal"
+    lead_in: float = 2.0   # chart times = song times + lead_in
 
     @property
     def duration(self) -> float:
@@ -70,7 +71,7 @@ def seq(items, bpm: float, start: float = 0.0, gate: float = 0.9) -> List[Note]:
 
 def beatmap_from_song(song: Song, lead_in: float = 2.0) -> Beatmap:
     if not song.notes:
-        return Beatmap(song.id, [])
+        return Beatmap(song.id, [], lead_in=lead_in)
     pitches = [n.midi for n in song.notes]
     lo, hi = min(pitches), max(pitches)
     span = max(1, hi - lo)
@@ -80,7 +81,7 @@ def beatmap_from_song(song: Song, lead_in: float = 2.0) -> Beatmap:
         lane = max(0, min(5, lane))
         notes.append(RNote(n.time + lead_in, lane))
     notes.sort(key=lambda r: r.time)
-    return Beatmap(song.id, notes)
+    return Beatmap(song.id, notes, lead_in=lead_in)
 
 
 class SongPlayer:

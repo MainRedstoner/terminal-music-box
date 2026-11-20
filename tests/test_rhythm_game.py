@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 from tmb import songs
 from tmb.config import DEFAULT_KEYS
@@ -171,6 +172,50 @@ class Judgment(Game):
         self.press(self.lane_key(n))
         self.assertIn(self.app.theme.t("rhythm.perfect"), self.frame)
         self.assertIn("0000303", self.frame)
+
+
+class Melody(Game):
+    def test_melody_autoplays_and_the_hit_is_silent(self):
+        self.start_play()
+        g = self.game
+        with mock.patch.object(self.engine, "play_note",
+                               wraps=self.engine.play_note) as pn:
+            self.at(g.beatmap.lead_in - 0.05)
+            self.assertEqual(pn.call_count, 0)      # silence during the lead-in
+            self.press(self.lane_key(g.notes[0]))   # the hit itself makes no sound
+            self.assertEqual(pn.call_count, 0)
+            self.advance(0.3)
+            self.assertEqual(pn.call_count, 1)      # the melody sounded on its own
+            self.assertEqual(pn.call_args.args[1], g.song.notes[0].midi)
+
+    def test_melody_note_lands_exactly_on_its_chart_time(self):
+        self.start_play()
+        g = self.game
+        with mock.patch.object(self.engine, "play_note",
+                               wraps=self.engine.play_note) as pn:
+            self.at(g.notes[0].time + PERFECT_WIN)
+            self.assertEqual(pn.call_count, 1)      # fires as the note crosses the line
+
+    def test_melody_pauses_with_the_game_and_resumes_after_the_countdown(self):
+        self.start_play()
+        g = self.game
+        self.advance(2.5)
+        self.assertGreaterEqual(self.engine.active(), 1)
+        pos = g.player.pos
+        self.press("esc")
+        self.advance(0.5)
+        self.assertEqual(g.player.pos, pos)
+        self.press("enter")
+        self.advance(COUNTDOWN + 0.2, dt=0.01)
+        self.assertEqual(g.state, "play")
+        self.assertGreater(g.player.pos, pos)
+
+    def test_finishing_stops_the_melody(self):
+        self.start_play()
+        g = self.game
+        self.run_until(lambda: g.state == "result", dt=0.05)
+        self.assertIsNone(g.player)
+        self.assertEqual(self.engine.active(), 0)
 
 
 class PauseAndResult(Game):

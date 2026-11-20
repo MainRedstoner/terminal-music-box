@@ -1,4 +1,4 @@
-"""Rhythm gameplay: 6 falling lanes, tap judgment, pause, countdown, result."""
+"""Rhythm gameplay: 6 falling lanes, tap judgment, auto-played melody."""
 from __future__ import annotations
 
 import math
@@ -20,7 +20,6 @@ RESULT_TAIL = 1.5
 EFFECT_TIME = 0.4
 LANE_FLASH = 0.15
 PALETTE = [C.cyan, C.green, C.yellow, C.magenta, C.blue, C.pink]
-SFX_PITCH = [60, 62, 64, 67, 69, 72]
 
 
 class RhythmGameScreen(Screen):
@@ -56,10 +55,18 @@ class RhythmGameScreen(Screen):
         self.pause_index = 0
         self.grade = "D"
         self.state = "countdown"
+        # The melody auto-plays for the whole run; hits are silent judgment
+        # only. The player is positioned so each note sounds exactly when its
+        # chart note crosses the judgment line (chart = song time + lead_in).
+        self.player = songs.SongPlayer(self.audio, self.song, self.config.timbre)
+        self.player.start()
+        self.player.pos = -self.beatmap.lead_in
 
     def exit(self) -> None:
         try:
-            self.audio.stop_all()
+            if self.player is not None:
+                self.player.stop()
+                self.player = None
         except Exception:
             pass
 
@@ -72,12 +79,6 @@ class RhythmGameScreen(Screen):
         self.fx_time = EFFECT_TIME
         if 0 <= lane < LANES:
             self.lane_fx[lane] = LANE_FLASH
-
-    def _sfx(self, lane: int) -> None:
-        try:
-            self.audio.play_note(self.config.timbre, SFX_PITCH[lane], 0.22, 0.9)
-        except Exception:
-            pass
 
     def _miss(self, lane: int, idx: int) -> None:
         self.note_state[idx] = 2
@@ -112,7 +113,6 @@ class RhythmGameScreen(Screen):
             self.good += 1
             self._fx(self.theme.t("rhythm.good"), C.cyan, lane)
         self.judged += 1
-        self._sfx(lane)
 
     def _pause(self) -> None:
         self.key_down.clear()
@@ -123,12 +123,22 @@ class RhythmGameScreen(Screen):
         self.countdown = COUNTDOWN
         self.state = "countdown"
 
+    def _sync_melody(self) -> None:
+        """Position the auto-play so a note sounds as its chart note lands."""
+        p = self.player
+        if p is None:
+            return
+        p.pos = self.song_time - self.beatmap.lead_in
+        p.update(0.0)
+
     def _finish(self) -> None:
         a = self._accuracy()
         self.grade = "S" if a >= 95 else "A" if a >= 88 else "B" if a >= 75 else "C" if a >= 60 else "D"
         self.state = "result"
         try:
-            self.audio.stop_all()
+            if self.player is not None:
+                self.player.stop()
+                self.player = None
         except Exception:
             pass
 
@@ -191,6 +201,7 @@ class RhythmGameScreen(Screen):
         if self.state != "play":
             return
         self.song_time += dt
+        self._sync_melody()
         ht = self.song_time - self.offset_sec
         for i, n in enumerate(self.notes):
             if self.note_state[i] == 0 and n.time + GOOD_WIN < ht:
