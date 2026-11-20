@@ -107,7 +107,7 @@ Eight public-domain melodies, shared by prenatal mode and the rhythm game
 | Ode to Joy | 欢乐颂 |
 | Jingle Bells | 铃儿响叮当 |
 | Happy Birthday | 祝你生日快乐 |
-| Canon in C (fragment) | 卡农(片段) |
+| Canon in C | 卡农 |
 | Brahms' Lullaby | 摇篮曲 |
 | London Bridge | 伦敦桥 |
 

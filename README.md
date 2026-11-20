@@ -94,7 +94,7 @@ Z X C V B N M   —— 低音 (C3..B3)
 | 欢乐颂 | Ode to Joy |
 | 铃儿响叮当 | Jingle Bells |
 | 祝你生日快乐 | Happy Birthday |
-| 卡农(片段) | Canon in C (fragment) |
+| 卡农 | Canon in C |
 | 摇篮曲 | Brahms' Lullaby |
 | 伦敦桥 | London Bridge |
 

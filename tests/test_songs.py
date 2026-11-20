@@ -46,6 +46,15 @@ class Library(unittest.TestCase):
         self.assertEqual(song.title("zh"), song.title_zh)
         self.assertEqual(song.title("en"), song.title_en)
 
+    def test_previously_partial_songs_are_full_versions(self):
+        # Ode to Joy: the complete 4-phrase theme; Jingle Bells: verse + chorus;
+        # Canon: three descending lines + quarter-note climax over the ground bass.
+        self.assertGreater(songs.SONGS["ode_joy"].duration, 30)
+        self.assertGreater(songs.SONGS["jingle_bells"].duration, 45)
+        self.assertGreater(songs.SONGS["canon"].duration, 40)
+        self.assertEqual(songs.SONGS["canon"].title_en, "Canon in C")
+        self.assertEqual(songs.SONGS["canon"].title_zh, "卡农")
+
     def test_seq_skips_rests_but_keeps_time(self):
         notes = songs.seq([(60, 1), (0, 1), (-1, 1), (64, 2)], bpm=120)
         self.assertEqual([n.midi for n in notes], [60, 64])

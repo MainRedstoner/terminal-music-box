@@ -176,16 +176,37 @@ register(Song("mary_lamb", "玛丽有只小羊羔", "Mary Had a Little Lamb", 10
     (62, 1), (62, 1), (64, 1), (62, 1), (60, 4),
 ], bpm=100)))
 
-# 欢乐颂 / Ode to Joy (Beethoven, public domain)
+# 欢乐颂 / Ode to Joy (Beethoven, public domain) — the complete 4-phrase theme.
 register(Song("ode_joy", "欢乐颂", "Ode to Joy", 100, seq([
+    # Phrase 1
     (64, 1), (64, 1), (65, 1), (67, 1), (67, 1), (65, 1), (64, 1), (62, 1),
     (60, 1), (60, 1), (62, 1), (64, 1), (64, 1.5), (62, 0.5), (62, 2),
+    # Phrase 2
+    (64, 1), (64, 1), (65, 1), (67, 1), (67, 1), (65, 1), (64, 1), (62, 1),
+    (60, 1), (60, 1), (62, 1), (64, 1), (62, 1.5), (60, 0.5), (60, 2),
+    # Phrase 3 ("Deine Zauber binden wieder ...")
+    (62, 1), (62, 1), (64, 1), (60, 1),
+    (62, 0.5), (64, 0.5), (65, 1), (64, 0.5), (62, 0.5), (60, 1),
+    (62, 0.5), (64, 0.5), (65, 1), (64, 0.5), (62, 0.5), (60, 1),
+    (62, 0.5), (64, 0.5), (65, 1), (64, 0.5), (62, 0.5), (55, 1.5),
+    # Phrase 4 ("Alle Menschen werden Brüder ...")
     (64, 1), (64, 1), (65, 1), (67, 1), (67, 1), (65, 1), (64, 1), (62, 1),
     (60, 1), (60, 1), (62, 1), (64, 1), (62, 1.5), (60, 0.5), (60, 2),
 ], bpm=100)))
 
-# 铃儿响叮当 / Jingle Bells (chorus, James Pierpont, public domain)
+# 铃儿响叮当 / Jingle Bells (James Pierpont, public domain) — verse + chorus.
 register(Song("jingle_bells", "铃儿响叮当", "Jingle Bells", 120, seq([
+    # Verse
+    (67, 1), (64, 1), (62, 1), (60, 2),                              # Dashing through the snow
+    (67, 1), (67, 1), (67, 1), (67, 1), (64, 1), (62, 0.5), (60, 0.5), (69, 2),  # in a one-horse open sleigh
+    (69, 1), (65, 1), (64, 1), (62, 1), (71, 2),                     # O'er the fields we go
+    (67, 1), (67, 1), (65, 1), (62, 1), (64, 2),                     # laughing all the way
+    (67, 1), (64, 1), (62, 1), (60, 2),                              # Bells on bobtail ring
+    (67, 1), (67, 1), (64, 1), (62, 1), (60, 1), (69, 2),            # making spirits bright
+    (69, 1), (69, 1), (65, 1), (64, 1), (62, 1),                     # What fun it is to ride
+    (67, 1), (67, 1), (67, 1), (67, 1),                              # and sing a sleighing
+    (69, 1), (67, 1), (65, 1), (62, 1), (60, 4),                     # song tonight
+    # Chorus
     (64, 1), (64, 1), (64, 2), (64, 1), (64, 1), (64, 2),
     (64, 1), (67, 1), (60, 1), (62, 1), (64, 4),
     (65, 1), (65, 1), (65, 1), (65, 1), (65, 1), (64, 1), (64, 1),
@@ -204,10 +225,15 @@ register(Song("happy_birthday", "祝你生日快乐", "Happy Birthday", 120, seq
     (77, 0.75), (77, 0.25), (76, 1), (72, 1), (74, 1), (72, 2),
 ], bpm=120)))
 
-# 卡农（片段） / Canon in C (fragment, Pachelbel, public domain)
-register(Song("canon", "卡农（片段）", "Canon in C (fragment)", 80, seq([
+# 卡农 / Canon in C (Pachelbel, public domain) — the three classic descending
+# violin lines over the ground bass, then the quarter-note climax and resolve.
+register(Song("canon", "卡农", "Canon in C", 80, seq([
     (76, 2), (74, 2), (72, 2), (71, 2), (69, 2), (67, 2), (69, 2), (71, 2),
-    (72, 2), (71, 2), (69, 2), (67, 2), (65, 2), (64, 2), (65, 2), (67, 2),
+    (74, 2), (72, 2), (71, 2), (69, 2), (67, 2), (64, 2), (65, 2), (67, 2),
+    (72, 2), (71, 2), (69, 2), (67, 2), (65, 2), (62, 2), (64, 2), (65, 2),
+    (76, 1), (74, 1), (72, 1), (71, 1), (69, 1), (67, 1), (69, 1), (71, 1),
+    (74, 1), (72, 1), (71, 1), (69, 1), (67, 1), (64, 1), (65, 1), (67, 1),
+    (72, 4),
 ], bpm=80)))
 
 # 摇篮曲 / Brahms' Lullaby (Wiegenlied Op.49 No.4, public domain).
