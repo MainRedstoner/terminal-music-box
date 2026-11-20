@@ -25,7 +25,8 @@ Implements [issue #1 — software development plan](https://github.com/MainRedst
 - **Audio** — a real-time polyphonic mixer streaming to ALSA (`aplay`) or
   PulseAudio/PipeWire (`pacat`/`paplay`) on Linux, `winmm` on Windows, and WAV/null
   backends for headless testing. Timbres are pre-rendered in a background thread
-  at startup and on switch, so the first press never stalls.
+  at startup and on switch, so the first press never stalls. Dense chords duck
+  the mix automatically (peak-hold + slow release) instead of clipping.
 
 ## Requirements
 

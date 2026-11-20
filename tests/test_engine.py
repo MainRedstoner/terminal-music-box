@@ -219,6 +219,29 @@ class Preload(unittest.TestCase):
         self.assertLess(harp, 4)
 
 
+class AdaptiveMix(unittest.TestCase):
+    """Chords duck to a clean ceiling instead of crushing through the knee."""
+
+    def setUp(self):
+        self.eng = AudioEngine(backend=NullBackend(), realtime=False)
+
+    def test_single_note_levels_never_duck(self):
+        self.assertEqual(self.eng._mix_target(0.5, 1.0), 1.0)
+        self.assertEqual(self.eng._mix_target(0.85, 1.0), 1.0)  # natural peak
+
+    def test_loud_sums_duck_to_the_ceiling_in_one_step(self):
+        self.assertAlmostEqual(self.eng._mix_target(2.66, 1.0), 0.85 / 2.66)
+        self.assertAlmostEqual(self.eng._mix_target(8.36, 1.0), 0.85 / 8.36)
+        self.assertEqual(self.eng._mix_target(2.66, 0.9), 0.85 / 2.66)
+
+    def test_mix_releases_slowly_back_to_full(self):
+        self.assertAlmostEqual(self.eng._mix_target(0.1, 0.5), 0.508)
+        self.assertAlmostEqual(self.eng._mix_target(0.1, 0.3), 0.308)
+
+    def test_release_never_overshoots_full_level(self):
+        self.assertEqual(self.eng._mix_target(0.0, 0.999), 1.0)
+
+
 class WavMixer(unittest.TestCase):
     """Start the real mixer thread and verify the rendered WAV is audible."""
 
@@ -278,6 +301,34 @@ class WavMixer(unittest.TestCase):
         time.sleep(0.4)
         self.eng.stop()
         self.assertGreater(pcm_peak(self.read_wav()), 3000)
+
+    def test_a_dense_chord_stays_below_the_clean_ceiling(self):
+        # Pre-render like the startup preload does, so all voices join at once.
+        for midi in (60, 62, 64, 65, 67, 69, 71, 72):
+            self.eng._buffers("harp", midi)
+        self.eng.start()
+        for midi in (60, 62, 64, 65, 67, 69, 71, 72):
+            self.eng.play_note("harp", midi, 1.2)
+        time.sleep(0.6)
+        self.eng.stop()
+        pcm = array.array("h")
+        pcm.frombytes(self.read_wav())
+        # the chunk-level limiter lets the 12 ms attack transient through, but
+        # eight harp voices summed would otherwise crush through the tanh knee
+        # for the whole chord — the steady state must stay under the ceiling
+        steady = pcm[int(synth.SR * 0.25):]
+        self.assertGreater(len(steady), 0)
+        self.assertLess(max(abs(s) for s in steady), int(0.75 * 32767))
+        self.assertLess(pcm_peak(self.read_wav()), 32700)  # no hard clipping
+
+    def test_a_single_note_keeps_its_loudness(self):
+        self.eng.start()
+        self.eng.play_note("harp", 60, 1.2)
+        time.sleep(0.6)
+        self.eng.stop()
+        peak = pcm_peak(self.read_wav())
+        self.assertGreater(peak, int(0.55 * 32767))
+        self.assertLess(peak, int(0.75 * 32767))
 
 
 if __name__ == "__main__":

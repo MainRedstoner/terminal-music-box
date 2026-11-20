@@ -18,6 +18,8 @@ from .synth import SR, NoteBuffers, Timbre, fade_out, get_timbre, zeros
 
 Segment = Tuple[array, bool]
 CACHE_LIMIT = 64  # long natural tails make rendered notes large; bound memory
+MIX_CEILING = 0.85   # pre-master peak where the adaptive mix starts ducking
+MIX_RELEASE = 0.008  # per-chunk recovery (~1.2 s back to full level)
 
 
 def _limit(s: float) -> float:
@@ -164,6 +166,25 @@ class AudioEngine:
         self._running = False
         self._samples = 0
         self._t0 = 0.0
+        self._mix_gain = 1.0  # adaptive headroom, mixer thread only
+        self._hold = 0.0      # decaying peak-hold feeding the mix decision
+
+    def _mix_target(self, peak: float, mix: float) -> float:
+        """Adaptive headroom for the current chunk.
+
+        A single note peaks around 0.85 pre-master and never ducks; when many
+        voices sum past MIX_CEILING the gain ducks instantly (the chunk is then
+        rendered with a smooth ramp, so the drop never clicks) and recovers
+        slowly afterwards. This keeps chords clean instead of crushing them
+        through the tanh knee.
+        """
+        if peak <= MIX_CEILING:
+            target = 1.0
+        else:
+            target = MIX_CEILING / peak
+        if target < mix:
+            return target  # duck immediately; the render ramp smooths it
+        return min(target, mix + MIX_RELEASE)
 
     def start(self) -> None:
         if self._running:
@@ -177,6 +198,8 @@ class AudioEngine:
             self.backend.open(self.sr, self.ch)
         self._running = True
         self._samples = 0
+        self._mix_gain = 1.0
+        self._hold = 0.0
         self._t0 = time.monotonic()
         self._thread = threading.Thread(target=self._loop, name="tmb-audio", daemon=True)
         self._thread.start()
@@ -195,6 +218,7 @@ class AudioEngine:
     def _loop(self) -> None:
         n = self.chunk
         g = self.master_gain
+        mix = 1.0  # gain at the end of the previous chunk
         while self._running:
             with self._lock:
                 voices = list(self._voices.items())
@@ -211,7 +235,21 @@ class AudioEngine:
                 chunk = v.pull(n)
                 vg = v.gain
                 acc = [a + b * vg for a, b in zip(acc, chunk)]
-            out = array("h", (int(_limit(s * g) * 32767) for s in acc))
+            peak = max((abs(s) for s in acc), default=0.0)
+            # peak-hold with a slow decay: short valleys between beats must not
+            # tempt the gain back up before the next loud chunk arrives
+            self._hold = max(peak, self._hold * 0.7)
+            new_mix = self._mix_target(self._hold, mix)
+            # linear gain ramp across the chunk: no clicks when the level ducks
+            step = (new_mix - mix) / n
+            gain = mix
+            vals = []
+            ap = vals.append
+            for s in acc:
+                gain += step
+                ap(int(_limit(s * gain * g) * 32767))
+            out = array("h", vals)
+            mix = new_mix
             try:
                 self.backend.write(out.tobytes())
             except Exception:
