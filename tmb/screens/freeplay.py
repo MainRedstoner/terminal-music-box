@@ -18,6 +18,9 @@ ROWS: Tuple[Tuple[str, str, Tuple[int, ...]], ...] = (
 KEY_MIDI: Dict[str, int] = {k: m for _, keys, midis in ROWS for k, m in zip(keys, midis)}
 PLAY_KEYS = frozenset(KEY_MIDI)
 NOTE_NAMES = {0: "C", 2: "D", 4: "E", 5: "F", 7: "G", 9: "A", 11: "B"}
+# Every built-in melody pitch lies inside the free-play range, so pre-rendering
+# these 21 keys covers free play, prenatal mode and the rhythm game alike.
+PRELOAD_MIDIS = sorted(set(KEY_MIDI.values()))
 
 REPEAT_TIMEOUT = 0.2   # auto-repeat debounce: POSIX terminals have no key-up
 ACTIVITY_WINDOW = 2.0
@@ -143,6 +146,7 @@ class FreePlayScreen(Screen):
         self._clear_keys()
         if self.player is not None:
             self.player.set_timbre(tid)
+        self.audio.preload(tid, PRELOAD_MIDIS)  # no stall on the first press
 
     def _toggle_prenatal(self) -> None:
         if self.player is None:

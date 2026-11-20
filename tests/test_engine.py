@@ -158,6 +158,50 @@ class VoiceBookkeeping(unittest.TestCase):
         self.assertEqual(eng._voices, {})
 
 
+class Preload(unittest.TestCase):
+    """Background pre-rendering keeps the first press of a timbre stall-free."""
+
+    def setUp(self):
+        self.eng = AudioEngine(backend=NullBackend(), realtime=False)
+
+    def _wait_cache(self, key, timeout=10.0):
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            if key in self.eng._cache:
+                return True
+            time.sleep(0.01)
+        return False
+
+    def test_preload_fills_the_cache_in_a_background_thread(self):
+        self.assertEqual(self.eng._cache, {})
+        self.eng.preload("bit", (60, 62, 64))
+        self.assertTrue(self._wait_cache(("bit", 64)))
+        self.assertEqual(len(self.eng._cache), 3)
+        self.eng.play_note("bit", 64, 0.3)  # already rendered: instant
+        self.assertEqual(self.eng.active(), 1)
+
+    def test_preload_returns_immediately_even_for_a_slow_timbre(self):
+        t0 = time.perf_counter()
+        self.eng.preload("harp", (60, 62, 64))
+        self.assertLess(time.perf_counter() - t0, 0.5)
+        self.assertTrue(self._wait_cache(("harp", 64)))
+        self.assertEqual(len(self.eng._cache), 3)
+
+    def test_preload_skips_entries_already_cached(self):
+        self.eng._buffers("bit", 60)
+        self.eng.preload("bit", (60, 62))
+        self.assertTrue(self._wait_cache(("bit", 62)))
+        self.assertEqual(set(self.eng._cache), {("bit", 60), ("bit", 62)})
+
+    def test_a_newer_preload_supersedes_the_running_one(self):
+        self.eng.preload("harp", (48, 50, 52, 53, 55, 57, 59))  # slow renders
+        self.eng.preload("bit", (60,))
+        self.assertTrue(self._wait_cache(("bit", 60)))
+        time.sleep(0.6)  # grace: at most one in-flight harp render may land
+        harp = sum(1 for tid, _ in self.eng._cache if tid == "harp")
+        self.assertLess(harp, 4)
+
+
 class WavMixer(unittest.TestCase):
     """Start the real mixer thread and verify the rendered WAV is audible."""
 

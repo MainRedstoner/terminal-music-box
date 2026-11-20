@@ -24,7 +24,8 @@ Implements [issue #1 — software development plan](https://github.com/MainRedst
   calibration, and rebindable keys.
 - **Audio** — a real-time polyphonic mixer streaming to ALSA (`aplay`) or
   PulseAudio/PipeWire (`pacat`/`paplay`) on Linux, `winmm` on Windows, and WAV/null
-  backends for headless testing.
+  backends for headless testing. Timbres are pre-rendered in a background thread
+  at startup and on switch, so the first press never stalls.
 
 ## Requirements
 

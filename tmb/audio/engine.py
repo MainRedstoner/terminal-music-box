@@ -157,6 +157,9 @@ class AudioEngine:
         self._lock = threading.Lock()
         self._next_id = 1
         self._cache: Dict[Tuple[str, int], NoteBuffers] = {}
+        self._cache_lock = threading.Lock()
+        self._preload_lock = threading.Lock()
+        self._preload_gen = 0
         self._thread: Optional[threading.Thread] = None
         self._running = False
         self._samples = 0
@@ -228,13 +231,41 @@ class AudioEngine:
 
     def _buffers(self, tid: str, midi: int) -> NoteBuffers:
         key = (tid, midi)
-        nb = self._cache.get(key)
+        with self._cache_lock:
+            nb = self._cache.get(key)
         if nb is None:
+            # Render outside the lock: it can take hundreds of ms and must not
+            # block the mixer thread or concurrent preloads.
             nb = get_timbre(tid).render(midi)
-            if len(self._cache) >= CACHE_LIMIT:
-                self._cache.pop(next(iter(self._cache)))
-            self._cache[key] = nb
+            with self._cache_lock:
+                if key not in self._cache:
+                    if len(self._cache) >= CACHE_LIMIT:
+                        self._cache.pop(next(iter(self._cache)))
+                    self._cache[key] = nb
         return nb
+
+    def preload(self, tid: str, midis) -> None:
+        """Render (tid, midi) buffers in a background daemon thread.
+
+        First use of a long-tail timbre can take hundreds of ms per key, which
+        would stall the UI on the first press; preloading removes that. A newer
+        preload request supersedes the running one (rapid timbre cycling).
+        """
+        with self._preload_lock:
+            self._preload_gen += 1
+            gen = self._preload_gen
+            todo = [m for m in midis if (tid, m) not in self._cache]
+        if not todo:
+            return
+        threading.Thread(target=self._preload_work, args=(tid, todo, gen),
+                         name="tmb-preload", daemon=True).start()
+
+    def _preload_work(self, tid: str, midis, gen: int) -> None:
+        for m in midis:
+            with self._preload_lock:
+                if gen != self._preload_gen:
+                    return  # superseded by a newer preload request
+            self._buffers(tid, m)
 
     def note_on(self, tid: str, midi: int, vel: float = 1.0) -> int:
         nb = self._buffers(tid, midi)

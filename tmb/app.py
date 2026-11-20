@@ -48,6 +48,11 @@ class App:
     def quit(self) -> None:
         self.running = False
 
+    def _preload_timbre(self) -> None:
+        # Local import: keeps app import-light and avoids screen-module cycles.
+        from .screens.freeplay import PRELOAD_MIDIS
+        self.audio.preload(self.config.timbre, PRELOAD_MIDIS)
+
     def _dispatch(self, e) -> None:
         if isinstance(e, ResizeEvent):
             self.terminal.screen.resize(e.w, e.h)
@@ -73,6 +78,7 @@ class App:
 
     def run(self) -> None:
         self.audio.start()
+        self._preload_timbre()
         self.navigate("menu")
         self._last = time.monotonic()
         try:

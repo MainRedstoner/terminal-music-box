@@ -20,7 +20,7 @@
   实时分数与连击、延迟校正、可自定义键位。
 - **音频** — 实时多声部混音器:Linux 下流式输出到 ALSA(`aplay`)或
   PulseAudio/PipeWire(`pacat`/`paplay`),Windows 下使用 `winmm`,另提供 WAV/null
-  后端用于无头测试。
+  后端用于无头测试。音色在启动与切换时后台预加载,首次弹奏不卡顿。
 
 ## 环境要求
 
