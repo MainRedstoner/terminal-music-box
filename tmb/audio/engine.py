@@ -279,13 +279,25 @@ class AudioEngine:
             v = Voice([(buf, False)], gain=vel)
         return self._add(v)
 
-    def play_note(self, tid: str, midi: int, dur: float, vel: float = 1.0) -> int:
+    def play_note(self, tid: str, midi: int, dur: float, vel: float = 1.0,
+                  length: Optional[float] = None) -> int:
+        """Play a fixed-length note.
+
+        `length` is the user's per-timbre note-length multiplier (None/1.0 =
+        the natural buffer from commit 4426253). Values below 1 trim the
+        buffer with a fade; values above 1 only extend timbres that can be
+        assembled (sustained ones) — ringing timbres simply end naturally.
+        """
         nb = self._buffers(tid, midi)
         t = get_timbre(tid)
+        mult = 1.0 if length is None else max(0.12, float(length))
         if t.sustain and nb.steady is not None:
-            buf = assemble_oneshot(nb, max(0.12, dur))
+            buf = assemble_oneshot(nb, max(0.12, dur * mult))
         else:
             buf = nb.oneshot if nb.oneshot is not None else assemble_oneshot(nb, dur)
+            if mult < 1.0:
+                want = max(int(SR * 0.12), int(len(buf) * mult))
+                buf = fade_out(buf[:want], 60)
         return self._add(Voice([(buf, False)], gain=vel))
 
     def _add(self, v: Voice) -> int:

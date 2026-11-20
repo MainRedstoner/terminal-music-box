@@ -44,7 +44,7 @@ def demo() -> None:
             app.step(0.016)
 
     frame("menu / unicode")
-    t.key("3")
+    t.key("4")
     frame("menu / ascii")
     t.key("1")
     frame("freeplay / ascii")
@@ -63,7 +63,7 @@ def demo() -> None:
     frame("freeplay / prenatal paused (no key for 2s)")
     t.key("esc")
     frame("back to menu")
-    t.key("3")
+    t.key("4")
     frame("menu / unicode again")
     t.key("1")
     frame("freeplay / unicode")

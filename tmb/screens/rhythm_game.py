@@ -58,7 +58,9 @@ class RhythmGameScreen(Screen):
         # The melody auto-plays for the whole run; hits are silent judgment
         # only. The player is positioned so each note sounds exactly when its
         # chart note crosses the judgment line (chart = song time + lead_in).
-        self.player = songs.SongPlayer(self.audio, self.song, self.config.timbre)
+        vol, length = self.config.sound_params(self.config.timbre)
+        self.player = songs.SongPlayer(self.audio, self.song, self.config.timbre,
+                                       vol=vol, length=length)
         self.player.start()
         self.player.pos = -self.beatmap.lead_in
 

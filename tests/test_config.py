@@ -46,7 +46,7 @@ class ConfigFile(unittest.TestCase):
         with open(self.path, "r", encoding="utf-8") as f:
             data = json.load(f)
         self.assertEqual(set(data), {"mode", "timbre", "rhythm_keys", "latency_ms",
-                                     "prenatal_song", "scroll_speed"})
+                                     "prenatal_song", "scroll_speed", "sound"})
 
     def test_missing_file_gives_defaults(self):
         self.assertEqual(Config.load(), Config())
@@ -89,6 +89,46 @@ class ConfigFile(unittest.TestCase):
         for mode in ("unicode", "ascii"):
             self.write({"mode": mode})
             self.assertEqual(Config.load().mode, mode)
+
+    def test_sound_params_default_to_natural(self):
+        c = Config()
+        self.assertEqual(c.sound_params("harp"), (1.0, 1.0))
+        self.assertEqual(c.sound_params("flute"), (1.0, 1.0))
+
+    def test_sound_params_clamp_out_of_range_values(self):
+        c = Config(sound={"harp": {"vol": 9.0, "len": 0.01},
+                          "flute": {"vol": -3.0, "len": 99.0}})
+        self.assertEqual(c.sound_params("harp"), (2.0, 0.25))
+        self.assertEqual(c.sound_params("flute"), (0.0, 4.0))
+
+    def test_sound_params_ignore_non_numeric_junk(self):
+        c = Config(sound={"harp": {"vol": "loud", "len": None}})
+        self.assertEqual(c.sound_params("harp"), (1.0, 1.0))
+
+    def test_set_sound_updates_and_persists(self):
+        c = Config()
+        c.set_sound("harp", vol=1.4, ln=0.5)
+        self.assertEqual(c.sound_params("harp"), (1.4, 0.5))
+        c.save()
+        self.assertEqual(Config.load().sound_params("harp"), (1.4, 0.5))
+
+    def test_set_sound_partial_keeps_the_other_value(self):
+        c = Config()
+        c.set_sound("bell", vol=0.8, ln=0.75)
+        c.set_sound("bell", ln=1.0)
+        self.assertEqual(c.sound_params("bell"), (0.8, 1.0))
+
+    def test_load_drops_malformed_sound_entries(self):
+        self.write({"sound": {"harp": "loud", "flute": {"vol": 0.5}, 42: {"vol": 1}}})
+        c = Config.load()
+        self.assertEqual(c.sound_params("harp"), (1.0, 1.0))
+        self.assertEqual(c.sound_params("flute"), (0.5, 1.0))
+
+    def test_non_dict_sound_resets_to_empty(self):
+        for bad in ("loud", 5, ["harp"]):
+            with self.subTest(sound=bad):
+                self.write({"sound": bad})
+                self.assertEqual(Config.load().sound, {})
 
     def test_save_is_atomic_enough_to_reload_repeatedly(self):
         c = Config()

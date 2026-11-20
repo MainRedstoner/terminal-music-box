@@ -1,4 +1,4 @@
-"""Main menu: Free Play, Rhythm Game, Unicode/ASCII toggle, Quit."""
+"""Main menu: Free Play, Rhythm Game, Sound settings, Unicode/ASCII toggle, Quit."""
 from __future__ import annotations
 
 from ..ansi import C
@@ -16,6 +16,7 @@ class MainMenu(Screen):
         return [
             (th.t("menu.freeplay"), lambda: self.app.navigate("freeplay")),
             (th.t("menu.rhythm"), lambda: self.app.navigate("rhythm_list")),
+            (th.t("menu.sound"), lambda: self.app.navigate("sound_settings")),
             (th.t("menu.toggle_mode"), self.app.toggle_mode),
             (th.t("menu.quit"), self.app.quit),
         ]
@@ -33,7 +34,7 @@ class MainMenu(Screen):
             self.index = (self.index + 1) % len(items)
         elif k == ENTER or k == "space":
             items[self.index][1]()
-        elif k in ("1", "2", "3", "4"):
+        elif k in ("1", "2", "3", "4", "5"):
             i = int(k) - 1
             if i < len(items):
                 self.index = i
@@ -53,13 +54,15 @@ class MainMenu(Screen):
         center_text(scr, 4, mode, C.dim)
         items = self._items()
         bw = min(40, w - 6)
-        bh = 3
         gap = 1
+        # Five rounded buttons need rows 5..(4n) — hidden hint makes it fit at 24 rows.
+        bh = 3 if len(items) * 4 - 1 <= h - 4 else 1
         total = len(items) * bh + (len(items) - 1) * gap
-        y0 = max(6, (h - total) // 2)
+        y0 = max(5, (h - total) // 2)
         x0 = (w - bw) // 2
         for i, (label, action) in enumerate(items):
             y = y0 + i * (bh + gap)
             draw_button(scr, x0, y, bw, bh, label, th, selected=(i == self.index),
                         hits=self.hits, action=action)
-        center_text(scr, h - 2, th.t("menu.hint"), C.dim)
+        if y0 + total <= h - 3:
+            center_text(scr, h - 2, th.t("menu.hint"), C.dim)

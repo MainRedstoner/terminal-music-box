@@ -8,6 +8,7 @@ def register_all(app) -> None:
     from .song_select import SongSelectScreen
     from .rhythm import (RhythmListScreen, RhythmCalibScreen, RhythmKeysScreen)
     from .rhythm_game import RhythmGameScreen
+    from .sound import SoundSettingsScreen
     app.register("menu", MainMenu)
     app.register("freeplay", FreePlayScreen)
     app.register("song_select", SongSelectScreen)
@@ -15,3 +16,4 @@ def register_all(app) -> None:
     app.register("rhythm_game", RhythmGameScreen)
     app.register("rhythm_calib", RhythmCalibScreen)
     app.register("rhythm_keys", RhythmKeysScreen)
+    app.register("sound_settings", SoundSettingsScreen)

@@ -125,11 +125,13 @@ class FreePlayScreen(Screen):
         if self.player is not None:
             return  # prenatal mode: keys only keep the auto-play alive, no sound
         midi = KEY_MIDI[key]
+        vol, length = self.config.sound_params(self.config.timbre)
         if self.app.release_events() and synth.get_timbre(self.config.timbre).sustain:
             # Real key-up events: hold the voice until the key is released.
-            self.key_voice[key] = self.audio.note_on(self.config.timbre, midi, 1.0)
+            self.key_voice[key] = self.audio.note_on(self.config.timbre, midi, vol)
         else:
-            self.audio.play_note(self.config.timbre, midi, NOTE_DUR, 1.0)
+            self.audio.play_note(self.config.timbre, midi, NOTE_DUR, vol,
+                                 length=length)
 
     def _key_up(self, key: str) -> None:
         if key in KEY_MIDI:
@@ -171,7 +173,9 @@ class FreePlayScreen(Screen):
             self.prenatal = False
 
     def _start_player(self, sid: Optional[str]) -> None:
-        self.player = songs.SongPlayer(self.audio, songs.get_song(sid), self.config.timbre)
+        vol, length = self.config.sound_params(self.config.timbre)
+        self.player = songs.SongPlayer(self.audio, songs.get_song(sid),
+                                       self.config.timbre, vol=vol, length=length)
         self.player.start()
         self.last_activity = self.clock
 

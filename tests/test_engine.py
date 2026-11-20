@@ -85,6 +85,23 @@ class VoiceBookkeeping(unittest.TestCase):
         vid = self.eng.note_on("bit", 60, 0.4)
         self.assertAlmostEqual(self.eng._voices[vid].gain, 0.4)
 
+    def test_play_note_length_one_keeps_the_natural_buffer(self):
+        natural = self.eng._buffers("harp", 60).oneshot
+        vid = self.eng.play_note("harp", 60, 1.0)
+        self.assertEqual(len(self.eng._voices[vid]._segments[0][0]), len(natural))
+
+    def test_play_note_length_trims_and_fades_to_silence(self):
+        natural = self.eng._buffers("harp", 60).oneshot
+        vid = self.eng.play_note("harp", 60, 1.0, length=0.5)
+        buf = self.eng._voices[vid]._segments[0][0]
+        self.assertEqual(len(buf), int(len(natural) * 0.5))
+        self.assertEqual(buf[-1], 0.0)
+
+    def test_play_note_length_extends_sustained_assembly(self):
+        vid = self.eng.play_note("flute", 60, 0.5, length=4.0)
+        buf = self.eng._voices[vid]._segments[0][0]
+        self.assertEqual(len(buf), int(0.5 * 4.0 * synth.SR))
+
     def test_buffers_are_cached_per_timbre_and_pitch(self):
         first = self.eng._buffers("harp", 60)
         self.assertIs(self.eng._buffers("harp", 60), first)

@@ -85,12 +85,19 @@ def beatmap_from_song(song: Song, lead_in: float = 2.0) -> Beatmap:
 
 
 class SongPlayer:
-    """Drives auto-playback; call update(dt) each frame. Pause freezes time."""
+    """Drives auto-playback; call update(dt) each frame. Pause freezes time.
 
-    def __init__(self, engine, song: Song, timbre: str):
+    `vol` and `length` carry the user's per-timbre sound settings: volume
+    scales every note's velocity, length rescales each note's duration.
+    """
+
+    def __init__(self, engine, song: Song, timbre: str,
+                 vol: float = 1.0, length: float = 1.0):
         self.engine = engine
         self.song = song
         self.timbre = timbre
+        self.vol = vol
+        self.length = length
         self.pos = 0.0
         self.idx = 0
         self.playing = False
@@ -123,7 +130,8 @@ class SongPlayer:
         notes = self.song.notes
         while self.idx < len(notes) and notes[self.idx].time <= self.pos:
             n = notes[self.idx]
-            self.engine.play_note(self.timbre, n.midi, n.dur, n.vel)
+            self.engine.play_note(self.timbre, n.midi, n.dur * self.length,
+                                  n.vel * self.vol)
             self.idx += 1
         if self.idx >= len(notes) and self.pos >= self.song.duration:
             self.finished = True

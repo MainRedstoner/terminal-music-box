@@ -45,15 +45,23 @@ python main.py --wav out.wav       # render audio to a file instead of a device
 python main.py --demo              # headless scripted demo (no terminal needed)
 ```
 
-Settings (UI mode, timbre, rhythm keys, latency offset, prenatal song) persist to
+Settings (UI mode, timbre, rhythm keys, latency offset, prenatal song,
+per-timbre sound settings) persist to
 `~/.config/terminal-music-box/config.json` (Linux) or
 `%APPDATA%/terminal-music-box/config.json` (Windows).
 
 ## Controls
 
 ### Main menu
-`↑/↓` select · `Enter` confirm · mouse click · `1–4` shortcuts.
+`↑/↓` select · `Enter` confirm · mouse click · `1–5` shortcuts.
 `^Q`/`^D`/`^C`/`Esc` quit.
+
+### Sound Settings
+Per-timbre **volume** (0–2.0 via `←`/`→`) and **note length** (0.25–4.0× via
+`A`/`D`; ringing timbres can only be trimmed down to a quarter of their
+natural tail, sustained timbres can stretch to 4×). `Enter` previews the
+selected timbre, `R` restores its defaults (volume 1.0, natural length —
+identical to the original build). Settings save automatically.
 
 ### Free Play
 Three diatonic C-major octaves (7 natural notes per row):
