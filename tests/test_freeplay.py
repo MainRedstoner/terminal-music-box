@@ -140,6 +140,17 @@ class FreePlay(HeadlessCase):
         self.assertTrue(p.playing)
         self.assertGreater(p.pos, 2.5)
 
+    def test_prenatal_mode_mutes_user_played_notes(self):
+        self.press("ctrl+t")
+        p = self.screen.player
+        self.press("a")
+        self.press("s")
+        self.assertTrue(self.screen.key_down.get("a"))
+        self.assertTrue(self.screen.key_down.get("s"))
+        self.assertTrue(p.playing)
+        # only the auto-played song note exists; neither key press made a sound
+        self.assertEqual(self.engine.active(), 1)
+
     def test_prenatal_song_loops_after_it_finishes(self):
         self.press("ctrl+t")
         p = self.screen.player
@@ -249,8 +260,12 @@ class FreePlay(HeadlessCase):
         self.click_label(th.t("freeplay.btn_prenatal", state=th.t("common.on")))
         self.assertIsNone(self.screen.player)
 
-    def test_mouse_click_on_song_button(self):
-        self.click_label(self.app.theme.t("freeplay.btn_song"))
+    def test_song_button_appears_only_with_prenatal_on(self):
+        th = self.app.theme
+        self.assertNotIn(th.t("freeplay.btn_song"), self.frame)
+        self.press("ctrl+t")
+        self.assertIn(th.t("freeplay.btn_song"), self.frame)
+        self.click_label(th.t("freeplay.btn_song"))
         self.assertEqual(self.app.current_name, "song_select")
 
     def test_mouse_click_on_back_button(self):

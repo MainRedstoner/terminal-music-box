@@ -117,6 +117,8 @@ class FreePlayScreen(Screen):
         if self.key_down.get(key, False):
             return
         self.key_down[key] = True
+        if self.player is not None:
+            return  # prenatal mode: keys only keep the auto-play alive, no sound
         self.audio.play_note(self.config.timbre, KEY_MIDI[key], NOTE_DUR, 1.0)
 
     def _key_up(self, key: str) -> None:
@@ -291,18 +293,20 @@ class FreePlayScreen(Screen):
         btns = [
             (th.t("freeplay.btn_timbre"), self._cycle_timbre, False),
             (th.t("freeplay.btn_prenatal", state=state), self._toggle_prenatal, on),
-            (th.t("freeplay.btn_song"), self._pick_song, False),
-            (th.t("common.back"), self._back, False),
         ]
+        if on:  # song picking only makes sense while prenatal mode is running
+            btns.append((th.t("freeplay.btn_song"), self._pick_song, False))
+        btns.append((th.t("common.back"), self._back, False))
+        gaps = len(btns) - 1
         gap = 2
         widths = [text_width(lab) + 4 for lab, _, _ in btns]
-        if sum(widths) + gap * 3 > w - 2:
+        if sum(widths) + gap * gaps > w - 2:
             gap = 1
             widths = [text_width(lab) + 2 for lab, _, _ in btns]
-        if sum(widths) + gap * 3 > w - 2:
-            scale = max(0.0, (w - 2 - gap * 3)) / max(1, sum(widths))
+        if sum(widths) + gap * gaps > w - 2:
+            scale = max(0.0, (w - 2 - gap * gaps)) / max(1, sum(widths))
             widths = [max(4, int(wd * scale)) for wd in widths]
-        total = sum(widths) + gap * 3
+        total = sum(widths) + gap * gaps
         x = max(0, (w - total) // 2)
         for (lab, action, sel), bw in zip(btns, widths):
             if x >= w:

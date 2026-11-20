@@ -17,7 +17,8 @@ Implements [issue #1 — software development plan](https://github.com/MainRedst
   13 melodic Minecraft 1.20 note-block timbres (percussion excluded), synthesized
   procedurally at runtime (no sample files).
 - **Prenatal mode** — gentle auto-played melodies that keep playing only while you
-  press a play key within a 2-second window; otherwise they pause.
+  press a play key within a 2-second window; otherwise they pause. While it is on,
+  the play keys are muted (only the auto-play sounds) and the song button appears.
 - **Rhythm Game** — vertically falling notes, a judgment line,
   Perfect / Good / Miss judgment with effects, live score & combo, latency
   calibration, and rebindable keys.
@@ -70,9 +71,12 @@ Z X C V B N M   — low   (C3..B3)
 - The on-screen keys and buttons are mouse-clickable.
 
 ### Prenatal mode
-When on, a lullaby plays automatically. Press **any** play key within **2 seconds**
-to keep it playing; otherwise it pauses, and the next key press resumes it.
-`^A` picks the song (defaults to the first: Twinkle Twinkle). Songs loop.
+When on, a lullaby plays automatically and the play keys become a silent
+accompaniment: they still light up and keep the music going, but make no sound.
+Press **any** play key within **2 seconds** to keep it playing; otherwise it
+pauses, and the next key press resumes it. The **Song button** shows only while
+prenatal mode is on; `^A` picks the song at any time (defaults to the first:
+Twinkle Twinkle). Songs loop.
 
 ### Rhythm Game
 - Default keys: `A S D J K L` (6 lanes), rebindable in **Key Config**
