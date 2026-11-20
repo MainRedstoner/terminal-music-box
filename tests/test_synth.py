@@ -107,6 +107,16 @@ class Render(unittest.TestCase):
             self.assertIsNotNone(nb.oneshot)
             self.assertIsNone(nb.steady)
 
+    def test_every_rendered_note_ends_at_exact_silence(self):
+        for tid in EXPECTED:
+            nb = rendered(tid)
+            bufs = [nb.oneshot] if nb.oneshot is not None else [nb.release]
+            for buf in bufs:
+                with self.subTest(timbre=tid):
+                    self.assertEqual(buf[-1], 0.0)
+                    tail = buf[-int(synth.SR * 0.02):]
+                    self.assertLess(max(abs(s) for s in tail), 0.02)
+
     def test_keyboard_extremes_are_non_silent(self):
         for tid in ("harp", "bit", "flute", "pling"):
             for midi in (48, 83):

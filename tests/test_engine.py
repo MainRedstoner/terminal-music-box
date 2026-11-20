@@ -10,7 +10,7 @@ import wave
 
 from tmb.audio import synth
 from tmb.audio.backends import NullBackend, WavBackend
-from tmb.audio.engine import AudioEngine, assemble_oneshot
+from tmb.audio.engine import AudioEngine, CACHE_LIMIT, Voice, assemble_oneshot
 
 
 def peak(buf) -> float:
@@ -90,6 +90,13 @@ class VoiceBookkeeping(unittest.TestCase):
         self.assertIs(self.eng._buffers("harp", 60), first)
         self.assertIsNot(self.eng._buffers("harp", 62), first)
 
+    def test_buffer_cache_is_bounded(self):
+        self.assertGreater(CACHE_LIMIT, 0)
+        for midi in range(60, 60 + CACHE_LIMIT + 1):
+            self.eng._buffers("xylophone", midi)
+        self.assertEqual(len(self.eng._cache), CACHE_LIMIT)
+        self.assertNotIn(("xylophone", 60), self.eng._cache)
+
     def test_assemble_oneshot_matches_requested_duration(self):
         nb = synth.get_timbre("flute").render(60)
         for dur in (0.3, 0.5, 1.0, 2.0):
@@ -107,6 +114,48 @@ class VoiceBookkeeping(unittest.TestCase):
 
     def test_assemble_oneshot_of_empty_buffers(self):
         self.assertEqual(len(assemble_oneshot(synth.NoteBuffers(), 0.5)), 0)
+
+    def test_assemble_oneshot_fades_to_exact_silence(self):
+        for tid in ("bit", "flute", "didgeridoo"):
+            for dur in (0.22, 0.5, 1.0):
+                with self.subTest(timbre=tid, dur=dur):
+                    buf = assemble_oneshot(synth.get_timbre(tid).render(60), dur)
+                    self.assertEqual(buf[-1], 0.0)
+                    self.assertLess(max(abs(s) for s in buf[-int(synth.SR * 0.02):]), 0.02)
+
+    def test_voice_fade_ramps_monotonically_to_zero(self):
+        v = Voice([(array.array("f", [1.0] * 1000), False)])
+        v.fade_out(100)
+        first = v.pull(50)
+        second = v.pull(50)
+        self.assertGreater(first[0], 0.9)
+        for i in range(1, len(first)):
+            self.assertLessEqual(first[i], first[i - 1] + 1e-6)
+        self.assertLess(abs(second[-1]), 1e-6)
+        self.assertTrue(v.done)
+
+    def test_stop_all_moves_voices_to_a_fading_tail(self):
+        eng = AudioEngine(backend=NullBackend(), realtime=False)
+        vid = eng.play_note("harp", 60, 1.0)
+        v = eng._voices[vid]
+        eng.stop_all()
+        self.assertEqual(eng.active(), 0)
+        self.assertEqual(eng._voices, {})
+        self.assertEqual(eng._fading, [v])
+        self.assertTrue(v.is_fading())
+        for _ in range(200):
+            if v.done:
+                break
+            v.pull(512)
+        self.assertTrue(v.done)
+
+    def test_stop_all_immediate_clears_fading_tails(self):
+        eng = AudioEngine(backend=NullBackend(), realtime=False)
+        eng.play_note("harp", 60, 1.0)
+        eng.stop_all()
+        eng.stop_all(0)
+        self.assertEqual(eng._fading, [])
+        self.assertEqual(eng._voices, {})
 
 
 class WavMixer(unittest.TestCase):

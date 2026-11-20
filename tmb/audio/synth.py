@@ -29,6 +29,17 @@ def midi_to_freq(midi: int) -> float:
     return 440.0 * (2.0 ** ((midi - 69) / 12.0))
 
 
+def pitch_decay(midi: int, low: float, high: float) -> float:
+    """Karplus-Strong damping interpolated over the low octave.
+
+    The loop attenuates once per period, so low notes ring far longer than
+    high ones for the same `decay`; without compensation their tail is still
+    audible when the buffer ends.
+    """
+    t = max(0.0, min(1.0, (midi - 48) / 12.0))
+    return low + (high - low) * t
+
+
 def zeros(n: int) -> array:
     return array("f", bytes(4 * n))
 
@@ -113,11 +124,26 @@ def mul(a: array, b: array) -> array:
 
 
 def add_partials(acc: array, f: float, parts) -> array:
+    """Add decaying sine partials in one pass (no temporary arrays).
+
+    Long natural tails make buffers several seconds long, so render cost
+    matters on a Raspberry Pi; this loop is roughly twice as fast as building
+    a tone and envelope array per partial.
+    """
     n = len(acc)
+    mask = _TABLE_SIZE - 1
     for mult, amp, tau in parts:
-        tone = wavetable(f * mult, n)
-        env = decay_env(n, tau)
-        acc = array("f", (a + amp * t * e for a, t, e in zip(acc, tone, env)))
+        inc = f * mult * _TABLE_SIZE / SR
+        r = math.exp(-1.0 / (SR * tau))
+        # Stop once this partial is 80 dB down; the rest is inaudible and the
+        # saving matters for multi-second tails on a Raspberry Pi.
+        limit = min(n, int(tau * math.log(max(amp, 1e-9) / 1e-4) * SR) + 1)
+        ph = 0.0
+        v = 1.0
+        for i in range(limit):
+            acc[i] += amp * _SINE[int(ph) & mask] * v
+            ph += inc
+            v *= r
     return acc
 
 
@@ -129,12 +155,13 @@ def normalize(buf: array, peak: float = 0.9) -> array:
 
 
 def fade_out(buf: array, ms: float) -> array:
+    """Raised-cosine fade to exact silence (smooth slope at both ends)."""
     nf = min(len(buf), int(ms / 1000 * SR))
     if nf <= 0:
         return buf
     out = array("f", buf)
     for i in range(nf):
-        out[len(out) - nf + i] *= 1.0 - i / nf
+        out[len(out) - nf + i] *= 0.5 + 0.5 * math.cos(math.pi * (i + 1) / nf)
     return out
 
 
@@ -166,7 +193,7 @@ def karplus_strong(freq: float, dur: float, decay: float = 0.996,
         buf[idx] = decay * (brightness * cur + (1 - brightness) * nxt)
         out[i] = cur
         idx = (idx + 1) % period
-    return normalize(fade_out(out, 30), 0.9)
+    return normalize(fade_out(out, 300), 0.9)
 
 
 @dataclass
@@ -195,11 +222,11 @@ class Harp(Timbre):
 
     def render(self, midi):
         f = midi_to_freq(midi)
-        n = int(SR * 1.6)
+        n = int(SR * 7.5)
         parts = [(1, 1.0, 1.6), (2, 0.45, 0.9), (3, 0.3, 0.6),
                  (4, 0.18, 0.4), (5, 0.1, 0.3), (6, 0.06, 0.2)]
         acc = add_partials(zeros(n), f, parts)
-        acc = fade_out(fade_in(normalize(acc, 0.85), 3), 40)
+        acc = fade_out(fade_in(normalize(acc, 0.85), 3), 800)
         return NoteBuffers(oneshot=acc)
 
 
@@ -213,7 +240,7 @@ class Bit(Timbre):
         f = midi_to_freq(midi)
         atk = fade_in(scale(periodic_square(f, 0.02), 0.5), 4)
         steady = scale(periodic_square(f, 0.3), 0.5)
-        rel = fade_out(scale(square(f, int(SR * 0.08)), 0.5), 80)
+        rel = fade_out(scale(square(f, int(SR * 0.2)), 0.5), 200)
         return NoteBuffers(attack=atk, steady=steady, release=rel)
 
 
@@ -240,7 +267,7 @@ class Flute(Timbre):
                    scale(wavetable(f * 3, steady_n), 0.06))
         breath = array("f", (_rng.uniform(-1, 1) * 0.03 for _ in range(steady_n)))
         steady = normalize(mix(base, breath), 0.7)
-        rel = fade_out(scale(wavetable(f, int(SR * 0.1)), 0.7), 100)
+        rel = fade_out(scale(wavetable(f, int(SR * 0.2)), 0.7), 200)
         return NoteBuffers(attack=atk, steady=steady, release=rel)
 
 
@@ -252,7 +279,7 @@ class Bass(Timbre):
 
     def render(self, midi):
         f = midi_to_freq(midi)
-        return NoteBuffers(oneshot=karplus_strong(f, 1.2, decay=0.995, brightness=0.35))
+        return NoteBuffers(oneshot=karplus_strong(f, 6.0, decay=pitch_decay(midi, 0.996, 0.998), brightness=0.35))
 
 
 class Bell(Timbre):
@@ -263,11 +290,11 @@ class Bell(Timbre):
 
     def render(self, midi):
         f = midi_to_freq(midi)
-        n = int(SR * 2.5)
+        n = int(SR * 5.0)
         parts = [(1.0, 1.0, 1.1), (2.0, 0.6, 0.8), (2.98, 0.4, 0.55),
                  (4.2, 0.25, 0.35), (5.4, 0.15, 0.25)]
         acc = add_partials(zeros(n), f, parts)
-        acc = fade_out(fade_in(normalize(acc, 0.85), 2), 120)
+        acc = fade_out(fade_in(normalize(acc, 0.85), 2), 600)
         return NoteBuffers(oneshot=acc)
 
 
@@ -279,7 +306,7 @@ class Guitar(Timbre):
 
     def render(self, midi):
         f = midi_to_freq(midi)
-        return NoteBuffers(oneshot=karplus_strong(f, 1.0, decay=0.994, brightness=0.5))
+        return NoteBuffers(oneshot=karplus_strong(f, 3.6, decay=pitch_decay(midi, 0.992, 0.994), brightness=0.5))
 
 
 class Chime(Timbre):
@@ -290,11 +317,11 @@ class Chime(Timbre):
 
     def render(self, midi):
         f = midi_to_freq(midi)
-        n = int(SR * 2.0)
-        parts = [(1.0, 0.7, 2.0), (2.76, 0.5, 1.5), (5.4, 0.35, 1.0),
-                 (8.9, 0.2, 0.7)]
+        n = int(SR * 6.0)
+        parts = [(1.0, 0.7, 1.6), (2.76, 0.5, 1.1), (5.4, 0.35, 0.7),
+                 (8.9, 0.2, 0.45)]
         acc = add_partials(zeros(n), f, parts)
-        acc = fade_out(fade_in(normalize(acc, 0.85), 2), 40)
+        acc = fade_out(fade_in(normalize(acc, 0.85), 2), 700)
         return NoteBuffers(oneshot=acc)
 
 
@@ -306,14 +333,14 @@ class Xylophone(Timbre):
 
     def render(self, midi):
         f = midi_to_freq(midi)
-        n = int(SR * 0.3)
+        n = int(SR * 0.7)
         tone = mix(scale(wavetable(f, n), 1.0), scale(wavetable(f * 4, n), 0.12))
         body = mul(tone, decay_env(n, 0.08))
         cn = int(SR * 0.005)
         click = scale(mul(array("f", (_rng.uniform(-1, 1) for _ in range(cn))),
                           decay_env(cn, 0.0015)), 0.3)
         acc = normalize(mix(body, click), 0.85)
-        return NoteBuffers(oneshot=acc)
+        return NoteBuffers(oneshot=fade_out(acc, 100))
 
 
 class IronXylophone(Timbre):
@@ -324,10 +351,10 @@ class IronXylophone(Timbre):
 
     def render(self, midi):
         f = midi_to_freq(midi)
-        n = int(SR * 0.5)
+        n = int(SR * 1.1)
         parts = [(1.0, 1.0, 0.18), (3.0, 0.5, 0.12), (5.1, 0.3, 0.08)]
         acc = add_partials(zeros(n), f, parts)
-        acc = fade_out(fade_in(normalize(acc, 0.85), 1), 20)
+        acc = fade_out(fade_in(normalize(acc, 0.85), 1), 150)
         return NoteBuffers(oneshot=acc)
 
 
@@ -339,10 +366,10 @@ class CowBell(Timbre):
 
     def render(self, midi):
         f = midi_to_freq(midi)
-        n = int(SR * 0.6)
+        n = int(SR * 1.2)
         tone = mix(scale(square(f, n), 0.6), scale(square(f * 1.5, n), 0.4))
         acc = fade_in(normalize(mul(tone, decay_env(n, 0.16)), 0.8), 1)
-        return NoteBuffers(oneshot=acc)
+        return NoteBuffers(oneshot=fade_out(acc, 200))
 
 
 class Didgeridoo(Timbre):
@@ -367,7 +394,7 @@ class Didgeridoo(Timbre):
                    scale(wavetable(f * 6, steady_n), 0.06))
         drone = array("f", (_rng.uniform(-1, 1) * 0.02 for _ in range(steady_n)))
         steady = normalize(mix(base, drone), 0.7)
-        rel = fade_out(scale(wavetable(f, int(SR * 0.12)), 0.75), 120)
+        rel = fade_out(scale(wavetable(f, int(SR * 0.2)), 0.75), 200)
         return NoteBuffers(attack=atk, steady=steady, release=rel)
 
 
@@ -379,7 +406,7 @@ class Banjo(Timbre):
 
     def render(self, midi):
         f = midi_to_freq(midi)
-        return NoteBuffers(oneshot=karplus_strong(f, 0.7, decay=0.99, brightness=0.7))
+        return NoteBuffers(oneshot=karplus_strong(f, 3.4, decay=pitch_decay(midi, 0.992, 0.994), brightness=0.7))
 
 
 class Pling(Timbre):
@@ -390,7 +417,7 @@ class Pling(Timbre):
 
     def render(self, midi):
         f = midi_to_freq(midi)
-        n = int(SR * 1.2)
+        n = int(SR * 3.2)
         out = zeros(n)
         ienv = decay_env(n, 0.18)
         inc = f * _TABLE_SIZE / SR
@@ -402,7 +429,7 @@ class Pling(Timbre):
             m = _SINE[int(ph) & mask]
             out[i] = _SINE[int(ph + ig * (0.08 + 0.92 * ienv[i]) * m) & mask]
             ph += inc
-        acc = fade_out(fade_in(normalize(mul(out, decay_env(n, 0.4)), 0.85), 3), 20)
+        acc = fade_out(fade_in(normalize(mul(out, decay_env(n, 0.4)), 0.85), 3), 500)
         return NoteBuffers(oneshot=acc)
 
 

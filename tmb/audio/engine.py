@@ -17,6 +17,7 @@ from .backends import Backend, open_backend
 from .synth import SR, NoteBuffers, Timbre, fade_out, get_timbre, zeros
 
 Segment = Tuple[array, bool]
+CACHE_LIMIT = 64  # long natural tails make rendered notes large; bound memory
 
 
 def _limit(s: float) -> float:
@@ -40,6 +41,18 @@ class Voice:
         self._loop_pos = 0
         self.gain = gain
         self.done = False
+        self._fade_total = 0
+        self._fade_left = 0
+
+    def fade_out(self, samples: int) -> None:
+        """Mark the voice to ramp to silence over `samples` frames."""
+        if self._fade_left > 0:
+            return
+        self._fade_total = max(1, samples)
+        self._fade_left = self._fade_total
+
+    def is_fading(self) -> bool:
+        return self._fade_left > 0
 
     def release(self) -> None:
         if not self._sustain:
@@ -56,7 +69,7 @@ class Voice:
                 take = min(len(rot), rn - i)
                 tail[i:i + take] = rot[:take]
                 i += take
-            self._segments = [(fade_out(tail, 80), False)]
+            self._segments = [(fade_out(tail, 1000.0 * rn / SR), False)]
             self._idx = 0
             self._pos = 0
         elif self._release is not None and len(self._release):
@@ -91,6 +104,14 @@ class Voice:
                     self._pos = 0
         if self._idx >= len(self._segments):
             self.done = True
+        if self._fade_left > 0:
+            played = self._fade_total - self._fade_left
+            take = min(n, self._fade_left)
+            for i in range(take):
+                out[i] *= 0.5 + 0.5 * math.cos(math.pi * (played + i + 1) / self._fade_total)
+            self._fade_left -= take
+            if self._fade_left <= 0:
+                self.done = True
         return out
 
 
@@ -116,7 +137,7 @@ def assemble_oneshot(nb: NoteBuffers, dur: float) -> array:
             take = min(len(rot), rn - i)
             tail[i:i + take] = rot[:take]
             i += take
-        out += fade_out(tail, 80)
+        out += fade_out(tail, 1000.0 * rn / SR)
     else:
         out += rel
     return out
@@ -132,6 +153,7 @@ class AudioEngine:
         self.master_gain = master_gain
         self.backend = backend if backend is not None else open_backend(sr=sr, ch=ch)
         self._voices: Dict[int, Voice] = {}
+        self._fading: List[Voice] = []
         self._lock = threading.Lock()
         self._next_id = 1
         self._cache: Dict[Tuple[str, int], NoteBuffers] = {}
@@ -161,7 +183,7 @@ class AudioEngine:
         if self._thread:
             self._thread.join(timeout=2)
             self._thread = None
-        self.stop_all()
+        self.stop_all(0)
         try:
             self.backend.close()
         except Exception:
@@ -173,6 +195,7 @@ class AudioEngine:
         while self._running:
             with self._lock:
                 voices = list(self._voices.items())
+                fading = list(self._fading)
             acc = [0.0] * n
             done = []
             for vid, v in voices:
@@ -181,16 +204,22 @@ class AudioEngine:
                 acc = [a + b * vg for a, b in zip(acc, chunk)]
                 if v.done:
                     done.append(vid)
+            for v in fading:
+                chunk = v.pull(n)
+                vg = v.gain
+                acc = [a + b * vg for a, b in zip(acc, chunk)]
             out = array("h", (int(_limit(s * g) * 32767) for s in acc))
             try:
                 self.backend.write(out.tobytes())
             except Exception:
                 pass
             self._samples += n
-            if done:
+            if done or fading:
                 with self._lock:
                     for vid in done:
                         self._voices.pop(vid, None)
+                    if fading:
+                        self._fading = [v for v in self._fading if not v.done]
             if not self.backend.blocking and self.realtime:
                 target = self._t0 + self._samples / self.sr
                 dt = target - time.monotonic()
@@ -202,6 +231,8 @@ class AudioEngine:
         nb = self._cache.get(key)
         if nb is None:
             nb = get_timbre(tid).render(midi)
+            if len(self._cache) >= CACHE_LIMIT:
+                self._cache.pop(next(iter(self._cache)))
             self._cache[key] = nb
         return nb
 
@@ -239,8 +270,16 @@ class AudioEngine:
         if v:
             v.release()
 
-    def stop_all(self) -> None:
+    def stop_all(self, fade_ms: float = 120.0) -> None:
+        """Silence every voice; fading voices finish their ramp in the mixer."""
         with self._lock:
+            if fade_ms > 0:
+                n = max(1, int(self.sr * fade_ms / 1000))
+                for v in self._voices.values():
+                    v.fade_out(n)
+                self._fading.extend(self._voices.values())
+            else:
+                self._fading.clear()
             self._voices.clear()
 
     def time(self) -> float:
