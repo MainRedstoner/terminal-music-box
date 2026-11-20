@@ -5,7 +5,9 @@ import unittest
 
 from tmb import songs
 from tmb.audio import synth
-from tmb.screens.freeplay import ACTIVITY_WINDOW, KEY_MIDI, REPEAT_TIMEOUT
+from tmb.events import KeyEvent
+from tmb.screens.freeplay import (ACTIVITY_WINDOW, KEY_MIDI, MAX_HOLD,
+                                  REPEAT_TIMEOUT)
 
 try:
     from tests.helpers import HeadlessCase, has_cjk
@@ -38,6 +40,16 @@ class FreePlay(HeadlessCase):
             self.press(key, dt=0.001)
             self.assertEqual(self.engine.active(), i + 1)
         self.assertEqual(len(self.screen.key_down), 21)
+        for key in KEY_MIDI:
+            self.release(key, dt=0.001)
+        self.assertEqual(self.screen.key_down, {})
+        self.assertEqual(self.engine.active(), 21)  # one-shots ring out
+
+    def test_legacy_terminal_expires_held_keys_after_the_timeout(self):
+        self.term.release_events = False
+        for key in KEY_MIDI:
+            self.press(key, dt=0.001)
+        self.assertEqual(len(self.screen.key_down), 21)
         self.advance(REPEAT_TIMEOUT + 0.1, dt=0.05)
         self.assertEqual(self.screen.key_down, {})
         self.assertEqual(self.engine.active(), 21)
@@ -48,7 +60,40 @@ class FreePlay(HeadlessCase):
         self.assertEqual(self.screen.key_down, {})
         self.assertEqual(self.engine.active(), 1)
 
-    def test_sustained_timbre_plays_a_fixed_length_one_shot(self):
+    def test_sustained_timbre_holds_a_voice_until_key_release(self):
+        self.cfg.timbre = "bit"
+        self.press("a")
+        voice = next(iter(self.engine._voices.values()))
+        self.assertTrue(voice._sustain)
+        self.advance(1.0)
+        self.assertEqual(self.engine.active(), 1)  # still sounding while held
+        self.assertTrue(self.screen.key_down.get("a"))
+        self.release("a")
+        self.assertEqual(self.screen.key_down, {})
+        self.assertEqual([loop for _, loop in voice._segments], [False])  # tail rings
+        self.assertEqual(self.engine.active(), 1)
+
+    def test_a_lost_release_is_capped_by_max_hold(self):
+        self.cfg.timbre = "bit"
+        self.press("a")
+        self.advance(MAX_HOLD + 0.3, dt=0.1)
+        self.assertEqual(self.screen.key_down, {})
+        self.assertEqual(self.screen.key_voice, {})
+        voice = next(iter(self.engine._voices.values()))
+        self.assertEqual([loop for _, loop in voice._segments], [False])  # capped off
+
+    def test_repeat_events_never_retrigger_a_note(self):
+        self.press("a")
+        self.term.send(KeyEvent("a", pressed=True, repeat=True))
+        self.step()
+        self.advance(0.5)
+        self.term.send(KeyEvent("a", pressed=True, repeat=True))
+        self.step()
+        self.assertEqual(self.engine.active(), 1)
+        self.assertTrue(self.screen.key_down.get("a"))
+
+    def test_legacy_sustained_timbre_plays_a_fixed_length_one_shot(self):
+        self.term.release_events = False
         self.cfg.timbre = "bit"
         self.press("a")
         voice = next(iter(self.engine._voices.values()))
@@ -244,9 +289,11 @@ class FreePlay(HeadlessCase):
         x, y = self.find_label("[S]")
         self.click(x + 1, y)
         voice = next(iter(self.engine._voices.values()))
-        self.assertFalse(voice._sustain)
+        self.assertTrue(voice._sustain)
         self.click(x + 1, y, kind="release")
         self.assertEqual(self.screen.key_down, {})
+        self.assertEqual(self.screen.key_voice, {})
+        self.assertEqual([loop for _, loop in voice._segments], [False])
         self.assertEqual(self.engine.active(), 1)
 
     def test_mouse_click_on_timbre_button(self):

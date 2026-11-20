@@ -27,7 +27,8 @@ PGDN = "pgdn"
 @dataclass(frozen=True)
 class KeyEvent:
     key: str
-    pressed: bool = True  # False == key release (Windows backend only)
+    pressed: bool = True  # False == key release (Windows backend, kitty protocol)
+    repeat: bool = False  # keyboard auto-repeat (kitty protocol event type 2)
 
     @property
     def is_ctrl(self) -> bool:

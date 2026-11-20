@@ -154,6 +154,8 @@ class RhythmGameScreen(Screen):
                 return  # only ESC pauses during play; ignore ^Q/^D/^C
             elif k in self.key_lane:
                 self.key_down[k] = True
+                if ev.repeat:
+                    return  # auto-repeat must not re-judge lane notes
                 self.last_press[k] = self.clock
                 self._hit_lane(self.key_lane[k])
             return
@@ -190,9 +192,11 @@ class RhythmGameScreen(Screen):
         for i in range(LANES):
             if self.lane_fx[i] > 0:
                 self.lane_fx[i] = max(0.0, self.lane_fx[i] - dt)
-        for k in list(self.key_down):
-            if self.key_down[k] and self.clock - self.last_press.get(k, 0.0) > REPEAT_TIMEOUT:
-                self.key_down[k] = False
+        if not self.app.release_events():
+            # Legacy terminals have no key-up: expire the pressed look heuristically.
+            for k in list(self.key_down):
+                if self.key_down[k] and self.clock - self.last_press.get(k, 0.0) > REPEAT_TIMEOUT:
+                    self.key_down[k] = False
         if self.state == "countdown":
             self.countdown -= dt
             if self.countdown <= 0:

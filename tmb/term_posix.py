@@ -28,6 +28,11 @@ _TILDE_MAP = {
 }
 _SS3_MAP = {"P": "f1", "Q": "f2", "R": "f3", "S": "f4",
             "A": UP, "B": DOWN, "C": RIGHT, "D": LEFT, "H": HOME, "F": END}
+# Kitty keyboard protocol functional key code points (CSI-u encoding).
+_KITTY_KEYS = {
+    9: TAB, 13: ENTER, 27: ESC, 32: SPACE, 127: BACKSPACE,
+}
+_KITTY_MOD_CTRL = 4  # shift=1 alt=2 ctrl=4 in the modifier bitfield
 
 
 def _norm_printable(ch: str) -> str:
@@ -36,6 +41,20 @@ def _norm_printable(ch: str) -> str:
     if ch.isalpha():
         return ch.lower()
     return ch
+
+
+def _event_type(params: str) -> int:
+    """Event type from CSI params: 1 press, 2 repeat, 3 release.
+
+    Kitty encodes it as the second colon sub-field of the second parameter,
+    e.g. "1;1:3" (arrow release) or "97;5:3" (ctrl+a release).
+    """
+    parts = params.split(";")
+    if len(parts) >= 2 and ":" in parts[1]:
+        tail = parts[1].split(":")
+        if len(tail) >= 2 and tail[1].isdigit():
+            return int(tail[1])
+    return 1
 
 
 class _Parser:
@@ -138,25 +157,53 @@ class _Parser:
                 return None
             return self._mouse(b, x - 1, y - 1, final == "M")
         if params.startswith("?"):
-            return None
+            return None  # mode / capability replies (DA1, kitty flag query)
+        if final == "u":
+            return self._csi_u(params)
+        et = _event_type(params)
         if final == "A":
-            return KeyEvent(UP)
+            return KeyEvent(UP, et != 3, et == 2)
         if final == "B":
-            return KeyEvent(DOWN)
+            return KeyEvent(DOWN, et != 3, et == 2)
         if final == "C":
-            return KeyEvent(RIGHT)
+            return KeyEvent(RIGHT, et != 3, et == 2)
         if final == "D":
-            return KeyEvent(LEFT)
+            return KeyEvent(LEFT, et != 3, et == 2)
         if final == "H":
-            return KeyEvent(HOME)
+            return KeyEvent(HOME, et != 3, et == 2)
         if final == "F":
-            return KeyEvent(END)
+            return KeyEvent(END, et != 3, et == 2)
         if final == "Z":
             return KeyEvent(TAB)
         if final == "~":
             key = _TILDE_MAP.get(params.split(";")[0])
-            return KeyEvent(key) if key else None
+            return KeyEvent(key, et != 3, et == 2) if key else None
         return None
+
+    def _csi_u(self, params: str):
+        """Kitty protocol: CSI unicode-key[:alts] ; modifiers:event-type ; text u."""
+        try:
+            fields = params.split(";")
+            key_num = int(fields[0].split(":")[0])
+            mods = 0
+            et = 1
+            if len(fields) >= 2 and fields[1]:
+                sub = fields[1].split(":")
+                if sub[0].isdigit():
+                    mods = max(0, int(sub[0]) - 1)
+                if len(sub) >= 2 and sub[1].isdigit():
+                    et = int(sub[1])
+        except (ValueError, IndexError):
+            return None
+        if key_num in _KITTY_KEYS:
+            key = _KITTY_KEYS[key_num]
+        elif 33 <= key_num < 127:
+            key = _norm_printable(chr(key_num))
+        else:
+            return None
+        if mods & _KITTY_MOD_CTRL and len(key) == 1 and key.isalpha():
+            key = "ctrl+" + key
+        return KeyEvent(key, et != 3, et == 2)
 
     @staticmethod
     def _mouse(b: int, x: int, y: int, press: bool):
@@ -170,6 +217,7 @@ class _Parser:
 
 class PosixBackend:
     name = "posix"
+    release_events = False  # set True when the kitty protocol is negotiated
 
     def __init__(self):
         import termios
@@ -181,6 +229,7 @@ class PosixBackend:
         self._parser = _Parser()
         self._resized = False
         self._old_handler = None
+        self._kitty = False
 
     def setup(self) -> None:
         termios = self._termios
@@ -194,9 +243,62 @@ class PosixBackend:
         cc[termios.VMIN] = 0
         cc[termios.VTIME] = 0
         termios.tcsetattr(self._fd, termios.TCSANOW, [iflag, oflag, cflag, lflag, ispeed, ospeed, cc])
+        self._kitty = self._negotiate_kitty()
+        self.release_events = self._kitty
         try:
             self._old_handler = signal.getsignal(signal.SIGWINCH)
             signal.signal(signal.SIGWINCH, self._on_winch)
+        except (ValueError, OSError, AttributeError):
+            pass
+
+    def _negotiate_kitty(self) -> bool:
+        """Enable the kitty keyboard protocol for press/repeat/release events.
+
+        Push flags (disambiguate | report event types), then query the current
+        flags and DA1. A ``CSI ? <flags> u`` reply proves support; a DA1-only
+        reply (or silence) means unsupported and we pop the flags again.
+        """
+        import re
+        try:
+            out = sys.stdout.buffer
+            out.write(b"\x1b[>3u\x1b[?u\x1b[c")
+            out.flush()
+        except Exception:
+            return False
+        data = b""
+        end = time.monotonic() + 0.2
+        kitty = False
+        while time.monotonic() < end:
+            r, _, _ = select.select([self._fd], [], [], max(0.0, end - time.monotonic()))
+            if not r:
+                break
+            data += os.read(self._fd, 4096)
+            if re.search(rb"\x1b\[\?[\d;]+u", data):
+                kitty = True
+                break
+        if not kitty:
+            try:
+                out.write(b"\x1b[<u")  # pop the flags we pushed
+                out.flush()
+            except Exception:
+                pass
+        return kitty
+
+    def teardown(self) -> None:
+        if self._kitty:
+            self._kitty = False
+            self.release_events = False
+            try:
+                sys.stdout.buffer.write(b"\x1b[<u")
+                sys.stdout.buffer.flush()
+            except Exception:
+                pass
+        if self._old is not None:
+            self._termios.tcsetattr(self._fd, self._termios.TCSANOW, self._old)
+            self._old = None
+        try:
+            if self._old_handler is not None:
+                signal.signal(signal.SIGWINCH, self._old_handler)
         except (ValueError, OSError, AttributeError):
             pass
 

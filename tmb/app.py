@@ -48,6 +48,10 @@ class App:
     def quit(self) -> None:
         self.running = False
 
+    def release_events(self) -> bool:
+        """True when the terminal reports key releases (kitty protocol / Windows)."""
+        return bool(getattr(self.terminal, "release_events", False))
+
     def _preload_timbre(self) -> None:
         # Local import: keeps app import-light and avoids screen-module cycles.
         from .screens.freeplay import PRELOAD_MIDIS

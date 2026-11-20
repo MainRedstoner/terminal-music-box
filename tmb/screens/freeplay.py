@@ -22,7 +22,8 @@ NOTE_NAMES = {0: "C", 2: "D", 4: "E", 5: "F", 7: "G", 9: "A", 11: "B"}
 # these 21 keys covers free play, prenatal mode and the rhythm game alike.
 PRELOAD_MIDIS = sorted(set(KEY_MIDI.values()))
 
-REPEAT_TIMEOUT = 0.2   # auto-repeat debounce: POSIX terminals have no key-up
+REPEAT_TIMEOUT = 0.2   # auto-repeat debounce: legacy terminals have no key-up
+MAX_HOLD = 8.0         # safety cap on a held voice if a release event is lost
 ACTIVITY_WINDOW = 2.0
 NOTE_DUR = 1.0
 CAP_W = 5
@@ -60,6 +61,7 @@ class FreePlayScreen(Screen):
         self.prenatal = False
         self.key_down: Dict[str, bool] = {}
         self.last_event: Dict[str, float] = {}
+        self.key_voice: Dict[str, int] = {}
         self._mouse_key: Optional[str] = None
 
     def enter(self, **kw) -> None:
@@ -122,7 +124,12 @@ class FreePlayScreen(Screen):
         self.key_down[key] = True
         if self.player is not None:
             return  # prenatal mode: keys only keep the auto-play alive, no sound
-        self.audio.play_note(self.config.timbre, KEY_MIDI[key], NOTE_DUR, 1.0)
+        midi = KEY_MIDI[key]
+        if self.app.release_events() and synth.get_timbre(self.config.timbre).sustain:
+            # Real key-up events: hold the voice until the key is released.
+            self.key_voice[key] = self.audio.note_on(self.config.timbre, midi, 1.0)
+        else:
+            self.audio.play_note(self.config.timbre, midi, NOTE_DUR, 1.0)
 
     def _key_up(self, key: str) -> None:
         if key in KEY_MIDI:
@@ -131,11 +138,17 @@ class FreePlayScreen(Screen):
     def _release(self, key: str) -> None:
         self.key_down.pop(key, None)
         self.last_event.pop(key, None)
+        vid = self.key_voice.pop(key, None)
+        if vid is not None:
+            self.audio.note_off(vid)
 
     def _clear_keys(self) -> None:
         self.key_down.clear()
         self.last_event.clear()
         self._mouse_key = None
+        for vid in self.key_voice.values():
+            self.audio.note_off(vid)
+        self.key_voice.clear()
 
     # Actions -----------------------------------------------------------------
 
@@ -175,9 +188,15 @@ class FreePlayScreen(Screen):
 
     def update(self, dt: float) -> None:
         self.clock += dt
-        for key in list(self.key_down):
-            if self.clock - self.last_event.get(key, 0.0) > REPEAT_TIMEOUT:
-                self._release(key)
+        if self.app.release_events():
+            # Releases arrive as events; only a lost release needs the cap.
+            for key, t0 in list(self.last_event.items()):
+                if self.clock - t0 > MAX_HOLD:
+                    self._release(key)
+        else:
+            for key in list(self.key_down):
+                if self.clock - self.last_event.get(key, 0.0) > REPEAT_TIMEOUT:
+                    self._release(key)
         p = self.player
         if p is not None:
             if self.clock - self.last_activity > ACTIVITY_WINDOW:

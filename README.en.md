@@ -66,6 +66,9 @@ Z X C V B N M   — low   (C3..B3)
 
 - `^X` — cycle timbre (harp, bass, flute, bell, guitar, chime, xylophone,
   iron xylophone, cow bell, didgeridoo, bit, banjo, pling).
+- **Key hold**: on Kitty-protocol terminals (or Windows terminals), sustained
+  timbres (flute, bit, didgeridoo) sound for as long as the key is held; other
+  terminals keep fixed-length notes, and holding never re-triggers a note.
 - `^T` — toggle prenatal mode.
 - `^A` — choose the prenatal song.
 - `^Q`/`^D`/`^C`/`Esc` — back to menu.

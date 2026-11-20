@@ -71,9 +71,64 @@ class ParserKeys(unittest.TestCase):
     def test_alt_letter_is_normalized(self):
         self.assertEqual(keys(self.p.feed(b"\x1ba")), ["a"])
 
-    def test_posix_never_emits_key_releases(self):
+    def test_legacy_sequences_never_emit_releases(self):
         ev = self.p.feed(b"a\x1b[A\r\x1b[<0;1;1M")
         self.assertTrue(all(e.pressed for e in ev if isinstance(e, KeyEvent)))
+
+
+class KittyProtocol(unittest.TestCase):
+    """CSI-u encoding: press / repeat / release events (kitty keyboard protocol)."""
+
+    def setUp(self):
+        self.p = _Parser()
+
+    def test_plain_letter_press_and_release(self):
+        self.assertEqual(self.p.feed(b"\x1b[97u"), [KeyEvent("a")])
+        self.assertEqual(self.p.feed(b"\x1b[97;1:3u"), [KeyEvent("a", pressed=False)])
+
+    def test_ctrl_letter_arrives_as_csi_u(self):
+        for code, letter in ((97, "a"), (113, "q"), (100, "d"), (99, "c"),
+                             (120, "x"), (116, "t")):
+            with self.subTest(code=code):
+                self.assertEqual(keys(self.p.feed(b"\x1b[%d;5u" % code)),
+                                 ["ctrl+" + letter])
+                self.assertEqual(keys(self.p.feed(b"\x1b[%d;5:3u" % code)),
+                                 ["ctrl+" + letter])
+                self.assertFalse(self.p.feed(b"\x1b[%d;5:3u" % code)[0].pressed)
+
+    def test_repeat_event_type(self):
+        self.assertEqual(self.p.feed(b"\x1b[97;1:2u"),
+                         [KeyEvent("a", pressed=True, repeat=True)])
+
+    def test_functional_keys(self):
+        self.assertEqual(keys(self.p.feed(b"\x1b[13u")), ["enter"])
+        self.assertEqual(keys(self.p.feed(b"\x1b[27u")), ["esc"])
+        self.assertEqual(keys(self.p.feed(b"\x1b[9u")), ["tab"])
+        self.assertEqual(keys(self.p.feed(b"\x1b[127u")), ["backspace"])
+        self.assertEqual(keys(self.p.feed(b"\x1b[32u")), ["space"])
+
+    def test_digits_and_punctuation_pass_through(self):
+        self.assertEqual(keys(self.p.feed(b"\x1b[49u\x1b[33u\x1b[45u")),
+                         ["1", "!", "-"])
+
+    def test_arrow_and_tilde_releases(self):
+        self.assertEqual(self.p.feed(b"\x1b[1;1:3A"), [KeyEvent("up", pressed=False)])
+        self.assertEqual(self.p.feed(b"\x1b[1;1:2B"),
+                         [KeyEvent("down", pressed=True, repeat=True)])
+        self.assertEqual(self.p.feed(b"\x1b[1;1:3D"), [KeyEvent("left", pressed=False)])
+        self.assertEqual(self.p.feed(b"\x1b[3;1:3~"),
+                         [KeyEvent("delete", pressed=False)])
+
+    def test_alternate_key_and_text_subfields_are_ignored(self):
+        self.assertEqual(keys(self.p.feed(b"\x1b[97:65;1;;97u")), ["a"])
+
+    def test_malformed_csi_u_is_dropped(self):
+        self.assertEqual(self.p.feed(b"\x1b[u"), [])
+        self.assertEqual(self.p.feed(b"\x1b[;;u"), [])
+        self.assertEqual(self.p.feed(b"\x1b[999999999999u"), [])
+
+    def test_capability_replies_are_ignored(self):
+        self.assertEqual(self.p.feed(b"\x1b[?3u\x1b[?62;1;6c"), [])
 
 
 class ParserPending(unittest.TestCase):

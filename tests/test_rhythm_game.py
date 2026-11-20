@@ -6,7 +6,9 @@ from unittest import mock
 
 from tmb import songs
 from tmb.config import DEFAULT_KEYS
-from tmb.screens.rhythm_game import (COUNTDOWN, GOOD_WIN, PERFECT_WIN, RESULT_TAIL)
+from tmb.events import KeyEvent
+from tmb.screens.rhythm_game import (COUNTDOWN, GOOD_WIN, PERFECT_WIN,
+                                     REPEAT_TIMEOUT, RESULT_TAIL)
 
 try:
     from tests.helpers import HeadlessCase
@@ -164,6 +166,29 @@ class Judgment(Game):
         self.press(self.lane_key(n))
         self.assertEqual(self.game.judged, 1)
         self.assertEqual(self.game.perfect, 1)
+
+    def test_repeat_events_never_judge_a_note(self):
+        self.start_play()
+        g = self.game
+        key = self.lane_key(g.notes[0])
+        self.at(g.notes[0].time)
+        self.press(key)
+        with mock.patch.object(g, "_hit_lane") as hit:
+            self.term.send(KeyEvent(key, pressed=True, repeat=True))
+            self.step()
+        hit.assert_not_called()
+        self.assertEqual(g.judged, 1)
+        self.assertTrue(g.key_down.get(key))
+
+    def test_legacy_terminal_expires_the_pressed_key_look(self):
+        self.term.release_events = False
+        self.start_play()
+        g = self.game
+        key = self.lane_key(g.notes[0])
+        self.at(g.notes[0].time)
+        self.press(key)
+        self.advance(REPEAT_TIMEOUT + 0.1, dt=0.05)
+        self.assertFalse(g.key_down.get(key))
 
     def test_judgment_feedback_is_drawn(self):
         self.start_play()

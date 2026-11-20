@@ -9,6 +9,8 @@ from .events import KeyEvent, MouseEvent, ResizeEvent
 
 
 class HeadlessTerminal:
+    release_events = True  # tests simulate releases with pressed=False
+
     def __init__(self, w: int = 80, h: int = 24):
         self.screen = Screen(w, h)
         self._queue = deque()

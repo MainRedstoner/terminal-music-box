@@ -90,6 +90,7 @@ def _norm(ch: str) -> str:
 
 class WindowsBackend:
     name = "windows"
+    release_events = True  # ReadConsoleInputW reports bKeyDown natively
 
     def __init__(self):
         self._hin = k32.GetStdHandle(STD_INPUT_HANDLE)

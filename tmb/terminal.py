@@ -77,5 +77,10 @@ class Terminal:
     def poll(self, timeout: float) -> List[Event]:
         return self.backend.poll(timeout)
 
+    @property
+    def release_events(self) -> bool:
+        """True when the backend reports key releases (kitty protocol / Windows)."""
+        return bool(getattr(self.backend, "release_events", False))
+
     def size(self):
         return self.backend.size()
