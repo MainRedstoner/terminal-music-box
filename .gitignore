@@ -11,3 +11,6 @@ venv/
 .qoder/
 *.scratch*
 *-issue.txt
+.codebuddy/
+.agents/
+.pytest_cache/
