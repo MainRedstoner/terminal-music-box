@@ -93,6 +93,8 @@ Twinkle Twinkle). Songs loop.
 ### Rhythm Game
 - The melody auto-plays for the whole run — each note sounds exactly as it
   crosses the judgment line. Your taps are silent judgment only.
+- Canon's timbre is locked to the didgeridoo, regardless of the free-play
+  timbre selection.
 - Default keys: `A S D J K L` (6 lanes), rebindable in **Key Config**
   (binding a key already in use swaps the two lanes).
 - **Latency Calibration** measures your input offset against a metronome (median

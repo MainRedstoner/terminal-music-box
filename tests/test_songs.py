@@ -51,6 +51,13 @@ class Library(unittest.TestCase):
         self.assertGreater(songs.SONGS["ode_joy"].duration, 30)
         self.assertGreater(songs.SONGS["jingle_bells"].duration, 45)
 
+    def test_only_canon_locks_a_timbre(self):
+        # The rhythm game always plays canon on the didgeridoo; other songs
+        # follow the user's timbre.
+        self.assertEqual(songs.SONGS["canon"].timbre, "didgeridoo")
+        self.assertEqual({sid for sid in songs.ORDER
+                          if songs.SONGS[sid].timbre is not None}, {"canon"})
+
     def test_canon_is_the_complete_four_part_score(self):
         song = songs.SONGS["canon"]
         spb = 60.0 / song.bpm

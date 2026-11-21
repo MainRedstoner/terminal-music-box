@@ -351,6 +351,35 @@ class PauseAndResult(Game):
         self.assertEqual(self.app.current_name, "rhythm_menu")
 
 
+class TimbreLock(Game):
+    song = "canon"
+
+    def test_canon_locks_the_timbre_to_the_didgeridoo(self):
+        g = self.game
+        self.assertEqual(g.timbre, "didgeridoo")
+        self.assertEqual(g.player.timbre, "didgeridoo")
+
+    def test_songs_without_a_lock_follow_the_user_timbre(self):
+        self.assertEqual(self.cfg.timbre, "harp")  # setup default
+        self.app.navigate("rhythm_game", song="twinkle")
+        self.assertEqual(self.app.current.timbre, "harp")
+
+    def test_the_locked_timbre_uses_its_own_sound_settings(self):
+        self.cfg.set_sound("didgeridoo", vol=0.5, ln=2.0)
+        self.restart()
+        self.assertEqual((self.game.player.vol, self.game.player.length),
+                         (0.5, 2.0))
+
+    def test_the_autoplayed_melody_sounds_the_didgeridoo(self):
+        self.start_play()
+        g = self.game
+        with mock.patch.object(self.engine, "play_note",
+                               wraps=self.engine.play_note) as pn:
+            self.at(g.beatmap.lead_in + 0.05)
+            self.assertGreater(pn.call_count, 0)
+            self.assertEqual(pn.call_args.args[0], "didgeridoo")
+
+
 class LatencyOffset(Game):
     def test_positive_latency_shifts_the_hit_window(self):
         self.restart(latency_ms=100)

@@ -58,8 +58,15 @@ class RhythmGameScreen(Screen):
         # The melody auto-plays for the whole run; hits are silent judgment
         # only. The player is positioned so each note sounds exactly when its
         # chart note crosses the judgment line (chart = song time + lead_in).
-        vol, length = self.config.sound_params(self.config.timbre)
-        self.player = songs.SongPlayer(self.audio, self.song, self.config.timbre,
+        # A song may lock its timbre (canon always plays the didgeridoo,
+        # whatever the free-play keyboard is set to); otherwise the user's
+        # choice stands. Preload the score's keys in the background so the
+        # auto-play never stalls on a first-use render mid-song.
+        self.timbre = self.song.timbre or self.config.timbre
+        self.audio.preload(self.timbre,
+                           sorted({n.midi for n in self.song.notes}))
+        vol, length = self.config.sound_params(self.timbre)
+        self.player = songs.SongPlayer(self.audio, self.song, self.timbre,
                                        vol=vol, length=length)
         self.player.start()
         self.player.pos = -self.beatmap.lead_in
