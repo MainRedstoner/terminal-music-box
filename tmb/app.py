@@ -92,4 +92,17 @@ class App:
                 self._last = now
                 self.step(dt)
         finally:
+            self._diag("run loop exited")
             self.audio.stop()
+            self._diag("audio stopped")
+
+    def _diag(self, msg: str) -> None:
+        """Append to the TMB_LOG_INPUT file when input diagnostics are on."""
+        import os
+        path = os.environ.get("TMB_LOG_INPUT")
+        if path:
+            try:
+                with open("%s.app" % path, "a", encoding="utf-8") as f:
+                    f.write(msg + "\n")
+            except OSError:
+                pass

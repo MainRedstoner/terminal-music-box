@@ -407,16 +407,6 @@ class PosixBackend:
             except Exception:
                 pass
 
-    def teardown(self) -> None:
-        if self._old is not None:
-            self._termios.tcsetattr(self._fd, self._termios.TCSANOW, self._old)
-            self._old = None
-        try:
-            if self._old_handler is not None:
-                signal.signal(signal.SIGWINCH, self._old_handler)
-        except (ValueError, OSError, AttributeError):
-            pass
-
     def size(self):
         import fcntl
         import struct

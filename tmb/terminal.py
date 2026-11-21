@@ -8,6 +8,17 @@ from typing import List, Optional
 from .ansi import Screen
 from .events import Event
 
+
+def _diag(msg: str) -> None:
+    """Append to the TMB_LOG_INPUT file when input diagnostics are on."""
+    path = os.environ.get("TMB_LOG_INPUT")
+    if path:
+        try:
+            with open(path + ".term", "a", encoding="utf-8") as f:
+                f.write(msg + "\n")
+        except OSError:
+            pass
+
 _MOUSE_ON = "\x1b[?1000h\x1b[?1002h\x1b[?1006h"
 _MOUSE_OFF = "\x1b[?1006l\x1b[?1002l\x1b[?1000l"
 
@@ -51,15 +62,20 @@ class Terminal:
         self.flush()
 
     def teardown(self) -> None:
+        _diag("term.teardown: begin")
         try:
             self.write(_MOUSE_OFF)
             self.write("\x1b[?25h")   # show cursor
             if self._alt:
                 self.write("\x1b[?1049l")  # leave alternate screen
             self.write("\x1b[0m")
+            _diag("term.teardown: sequences buffered")
             self.flush()
+            _diag("term.teardown: flushed")
         finally:
+            _diag("term.teardown: calling backend")
             self.backend.teardown()
+            _diag("term.teardown: backend done")
 
     def write(self, s: str) -> None:
         self._buf.append(s)
