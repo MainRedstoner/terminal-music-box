@@ -70,6 +70,16 @@ class HeadlessCase(unittest.TestCase):
         self.term.key(key)
         self.app.step(dt)
 
+    def tap(self, key, dt=0.016):
+        """A real tap: key-down and key-up in the same frame.
+
+        `press` models holding the key down (no release), which the rhythm
+        game must treat as one press plus auto-repeat, not as repeated taps.
+        """
+        self.term.key(key)
+        self.term.key(key, pressed=False)
+        self.app.step(dt)
+
     def release(self, key, dt=0.016):
         self.term.key(key, pressed=False)
         self.app.step(dt)

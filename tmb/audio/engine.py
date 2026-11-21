@@ -200,7 +200,7 @@ class AudioEngine:
         self._samples = 0
         self._mix_gain = 1.0
         self._hold = 0.0
-        self._t0 = time.monotonic()
+        self._t0 = time.perf_counter()
         self._thread = threading.Thread(target=self._loop, name="tmb-audio", daemon=True)
         self._thread.start()
 
@@ -263,7 +263,7 @@ class AudioEngine:
                         self._fading = [v for v in self._fading if not v.done]
             if not self.backend.blocking and self.realtime:
                 target = self._t0 + self._samples / self.sr
-                dt = target - time.monotonic()
+                dt = target - time.perf_counter()
                 if dt > 0:
                     time.sleep(dt)
 
