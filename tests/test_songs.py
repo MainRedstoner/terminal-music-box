@@ -181,14 +181,17 @@ class Beatmaps(unittest.TestCase):
             with self.subTest(song=sid):
                 melody = song.chart_notes if song.chart_notes is not None else song.notes
                 self.assertEqual(bm.song_id, sid)
-                self.assertGreaterEqual(len(bm.notes), len(melody))
-                if sid != "turkish_march":
+                if sid == "turkish_march":
+                    # The chart taps the eighth-note skeleton of the right hand,
+                    # so it is a subset of the written line, not a copy of it.
+                    self.assertGreater(len(bm.notes), 400)
+                    self.assertLess(len(bm.notes), len(melody))
+                else:
                     self.assertEqual(len(bm.notes), len(melody))
                 # Accent chords repeat a melody time; no chart note may drift.
-                self.assertEqual(
-                    sorted({round(n.time, 9) for n in bm.notes}),
-                    sorted({round(n.time + 2.0, 9) for n in melody}),
-                )
+                chart_times = {round(n.time, 9) for n in bm.notes}
+                melody_times = {round(n.time + 2.0, 9) for n in melody}
+                self.assertTrue(chart_times <= melody_times)
                 times = [n.time for n in bm.notes]
                 self.assertEqual(times, sorted(times))
                 for rn in bm.notes:
@@ -239,8 +242,21 @@ class Beatmaps(unittest.TestCase):
     def test_turkish_march_beatmap_uses_every_lane(self):
         song = songs.SONGS["turkish_march"]
         bm = songs.get_beatmap("turkish_march")
-        self.assertGreater(len(bm.notes), len(song.chart_notes))
+        self.assertGreater(len(bm.notes), 400)
+        self.assertLess(len(bm.notes), len(song.chart_notes))
         self.assertEqual({n.lane for n in bm.notes}, set(range(6)))
+
+    def test_turkish_march_chart_taps_the_eighth_note_skeleton(self):
+        song = songs.SONGS["turkish_march"]
+        bm = songs.get_beatmap("turkish_march")
+        eighth = 30.0 / song.bpm
+        for rn in bm.notes:
+            grid = (rn.time - bm.lead_in) / eighth
+            with self.subTest(time=rn.time):
+                self.assertAlmostEqual(grid, round(grid), places=6)
+        written = {round(n.time + bm.lead_in, 6) for n in song.chart_notes}
+        chart = {round(n.time, 6) for n in bm.notes}
+        self.assertTrue(chart <= written)
 
     def test_turkish_march_adds_accent_chords(self):
         song = songs.SONGS["turkish_march"]
@@ -324,8 +340,15 @@ class Beatmaps(unittest.TestCase):
             self.assertEqual(len(lanes), 2)
 
         loads = [sum(1 for n in bm.notes if n.lane == lane) for lane in range(6)]
-        self.assertGreaterEqual(min(loads), 80)
-        self.assertLessEqual(max(loads), 120)
+        # Eighth notes and faster stay on the middle four keys, so those carry
+        # the chart and must stay even; the outer two take only isolated long
+        # notes, which keeps a hand from stretching for A or L mid-run.
+        inner = loads[1:5]
+        self.assertLessEqual(max(inner) - min(inner), 30)
+        self.assertGreaterEqual(min(inner), 110)
+        outer = loads[0] + loads[5]
+        self.assertGreater(outer, 0)
+        self.assertLessEqual(outer / len(bm.notes), 0.15)
 
         # No lane may appear on three consecutive onsets.
         timeline = [by_time[t] for t in sorted(by_time)]
@@ -360,6 +383,86 @@ class Beatmaps(unittest.TestCase):
         song = songs.Song("one", "一", "One", 100, songs.seq([(60, 1), (60, 1)], bpm=100))
         bm = songs.beatmap_from_song(song)
         self.assertEqual({n.lane for n in bm.notes}, {0})
+
+
+class ChartErgonomics(unittest.TestCase):
+    """The rhythm charts are written for two hands on six keys."""
+
+    # Longest run of onsets owned by one hand. Canon's 15 arrive at a slow
+    # 1.5 notes/s and are harmless; anything beyond these limits means a hand
+    # is being asked to hammer a fast stream alone.
+    HAND_RUN_LIMITS = {"canon": 16, "minuet_g": 6,
+                       "turkish_march": 14, "fur_elise": 10}
+
+    def _onsets(self, sid):
+        events = {}
+        for note in songs.get_beatmap(sid).notes:
+            events.setdefault(round(note.time, 6), []).append(note.lane)
+        times = sorted(events)
+        return times, [sorted(events[t]) for t in times]
+
+    def test_no_chart_leaves_one_hand_on_a_long_run(self):
+        for sid, limit in self.HAND_RUN_LIMITS.items():
+            with self.subTest(song=sid):
+                _times, lanes = self._onsets(sid)
+                run = best = 0
+                previous = None
+                for onset in lanes:
+                    if len(onset) > 1:
+                        # A two-hand chord neither extends nor breaks a run.
+                        continue
+                    hand = onset[0] < 3
+                    run = run + 1 if hand == previous else 1
+                    previous = hand
+                    best = max(best, run)
+                self.assertLessEqual(best, limit)
+
+    def test_minuet_chart_is_planned_for_two_hands(self):
+        bm = songs.get_beatmap("minuet_g")
+        loads = Counter(n.lane for n in bm.notes)
+        left = sum(loads[lane] for lane in (0, 1, 2)) / len(bm.notes)
+        self.assertAlmostEqual(left, 0.5, delta=0.08)
+        # The outer keys still take part (the chart reads low-left, high-right)
+        # but never more than roughly a fifth of the notes.
+        outer = (loads[0] + loads[5]) / len(bm.notes)
+        self.assertGreater(outer, 0.02)
+        self.assertLessEqual(outer, 0.12)
+
+    def test_minuet_chart_does_not_stack_repeated_keys(self):
+        times, lanes = self._onsets("minuet_g")
+        repeats = sum(1 for a, b in zip(lanes, lanes[1:]) if set(a) & set(b))
+        self.assertLessEqual(repeats / len(times), 0.02)
+
+    def test_dense_notes_stay_on_the_middle_four_lanes(self):
+        # Canon keeps its own, stricter check in CanonChart; these three use the
+        # half-beat threshold every chart was retuned to.
+        for sid in ("minuet_g", "turkish_march", "fur_elise"):
+            with self.subTest(song=sid):
+                bm = songs.get_beatmap(sid)
+                spb = 60.0 / songs.SONGS[sid].bpm
+                times = sorted({round(n.time, 6) for n in bm.notes})
+                dense = set()
+                for i, t in enumerate(times):
+                    gaps = []
+                    if i:
+                        gaps.append(t - times[i - 1])
+                    if i + 1 < len(times):
+                        gaps.append(times[i + 1] - t)
+                    if gaps and min(gaps) <= spb * 0.5 + 1e-9:
+                        dense.add(t)
+                self.assertGreater(len(dense), len(times) // 4)
+                for note in bm.notes:
+                    if round(note.time, 6) in dense:
+                        self.assertIn(note.lane, (1, 2, 3, 4))
+
+    def test_accent_chords_are_mirrored_when_the_key_is_free(self):
+        for sid in ("minuet_g", "turkish_march", "fur_elise"):
+            with self.subTest(song=sid):
+                _times, lanes = self._onsets(sid)
+                doubles = [l for l in lanes if len(l) > 1]
+                self.assertGreater(len(doubles), 0)
+                mirrored = sum(1 for l in doubles if l[0] + l[1] == 5)
+                self.assertGreaterEqual(mirrored, len(doubles) * 0.8)
 
 
 class CanonChart(unittest.TestCase):

@@ -96,9 +96,11 @@ Twinkle Twinkle). Songs loop.
 - Canon's timbre is locked to the didgeridoo; Turkish March, Minuet in G, and
   Für Elise use the electric piano, regardless of the free-play timbre selection.
 - Turkish March is the complete rondo
-  (A-B-A'-C-D-E-C-A-B-A'-transition-coda); its chart follows the right-hand
-  theme. Dense passages stay on the four inner lanes and alternate between
-  them, and every other bar's accented downbeat plus the final note adds a
+  (A-B-A'-C-D-E-C-A-B-A'-transition-coda); its chart taps the **eighth-note
+  skeleton** of the right-hand theme — the sixteenth-note runs are still heard
+  from the auto-play but are not tapped. Dense passages stay on the four inner
+  lanes, a note crosses to the other hand once one hand has carried six fast
+  notes, and every other bar's accented downbeat plus the final note adds a
   two-key chord.
 - Default keys: `A S D J K L` (6 lanes), rebindable in **Key Config**
   (binding a key already in use swaps the two lanes).
@@ -106,6 +108,12 @@ Twinkle Twinkle). Songs loop.
   (`S D J K`), rotating the fingering every couple of cycles so long streams
   never settle into one loop; isolated notes spread across all six by register,
   and phrase accents are two-key chords.
+- All four rhythm charts share one lane-planning toolbox (`tmb/charts.py`):
+  pitches are cut into six contiguous bands **by note count** so a pitch always
+  falls in the same place; eighth notes and faster stay on the middle four keys
+  while the outer two take only isolated long notes; a repair pass removes
+  repeated lanes and breaks over-long one-hand blocks; and an accent chord is a
+  mirror (`A`↔`L`, `S`↔`K`, `D`↔`J`), the same shape on both hands.
 - **Latency Calibration** measures your input offset against a metronome (median
   of 12 taps).
 - `Esc` pauses (only `Esc` during play); the pause menu offers quit or resume,
@@ -118,9 +126,10 @@ Twinkle Twinkle). Songs loop.
 
 Eleven public-domain melodies. Prenatal mode includes the full library; the rhythm
 game contains the complete Canon (with falling notes derived from violin I),
-Minuet in G (AABB repeats, right-hand lead with accented double notes), Turkish
-March (right-hand theme, complete rondo), and Für Elise (top right-hand voice,
-evenly spread across the six lanes with light double taps on chords and downbeats):
+Minuet in G (AABB repeats, right-hand lead banded by note count, mirrored accents),
+Turkish March (right-hand theme on its eighth-note skeleton, complete rondo), and
+Für Elise (top right-hand voice, dense notes on the middle four lanes, mirrored
+double taps on chords and downbeats):
 
 | Song | Chinese |
 | --- | --- |
@@ -148,16 +157,19 @@ including both repeated sections and the written grace note.
 Turkish March uses the complete written-through score from
 [Mutopia-2015/08/13-108](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=108),
 typeset by Rune Zedeler and Chris Sawer (public domain); repeats are not taken.
-Auto-play keeps both piano hands, while the chart follows the right-hand melody
-with ornaments shorter than a sixteenth removed.
+Auto-play keeps both piano hands and the sixteenth-note runs, while the chart taps
+only the eighth-note skeleton of the right-hand melody, with ornaments shorter
+than a sixteenth removed.
 
 Für Elise uses the complete WoO 59 piano score from
 [Mutopia-2015/08/18-931](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=931)
 (Breitkopf & Härtel, 1888), with both printed repeats expanded. Typesetter Stelios
 Samelis dedicated this edition to the public domain. Its chart keeps the top
 right-hand voice as the primary tap; micro-timed grace notes remain only in the
-auto-played score. Chords and the first beat of every four bars add light double
-taps, lane loads stay balanced, and no lane repeats on three consecutive onsets.
+auto-played score. Eighth notes and faster stay on the middle four lanes while the
+outer two take only isolated long notes, no lane repeats on three consecutive
+onsets, and chords are mirrored across the middle; a fast right-hand passage lends
+one note to the left hand after six notes, so two fingers never machine-gun a run.
 
 ## Architecture
 
@@ -178,6 +190,7 @@ tmb/
     engine.py      polyphonic mixer thread + voices
     synth.py       procedural Minecraft note-block timbres
   songs.py         melodies, beatmaps, pausable song player
+  charts.py        lane planning: pitch bands, fingering shapes, corrections
   screens/         main_menu, freeplay, rhythm, rhythm_game, song_select
 ```
 

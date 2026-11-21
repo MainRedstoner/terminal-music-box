@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import math
 from bisect import bisect_right
-from collections import Counter
 from dataclasses import dataclass, field
 from functools import cached_property
 from typing import Dict, List, Optional, Tuple
+
+from . import charts
 
 
 @dataclass
@@ -106,53 +107,80 @@ def _turkish_lane_plan(melody: List[Note], bpm: float
                        ) -> Tuple[List[int], List[Tuple[int, int]]]:
     """Return (main lanes, accent companions) for the Turkish March chart.
 
-    Dense 16th-note streams stay on the four inner lanes, and a repeated pitch
-    alternates to a neighbouring lane instead of piling up on one key. Every
-    other bar's long downbeat (and the final note) adds a companion lane for a
-    two-key accent chord.
+    Dense 16th-note streams stay on the four inner lanes and alternate to a
+    neighbouring key instead of piling up on one: the same-pitch repeats that
+    fill this piece would otherwise stack 20 taps on one key.  Bands are cut
+    by note count, not by pitch range, because the right hand spends most of
+    the piece inside a narrow octave and a range split would squeeze two
+    thirds of the chart onto two lanes.  A hand that has carried a long block
+    crosses to the other hand for a note, so neither hand is left idle while
+    the other hammers away.  Every other bar's long downbeat (and the final
+    note) adds a companion lane for a two-key accent chord, mirrored so both
+    hands repeat the same shape.
     """
     n = len(melody)
+    if not n:
+        return [], []
     times = [note.time for note in melody]
-    lo = min(note.midi for note in melody)
-    hi = max(note.midi for note in melody)
-    span = max(1, hi - lo)
-    dense_gap = 0.25 * 60.0 / bpm
+    spb = 60.0 / bpm
+    # An eighth note or faster is dense: exactly like the canon chart, it stays
+    # on the middle four keys so no run stretches a hand out to A or L.
+    dense = charts.dense_flags(times, spb, 0.5)
+    dense_gap = 0.5 * spb
 
-    dense: List[bool] = []
-    for i in range(n):
-        prev_gap = times[i] - times[i - 1] if i else float("inf")
-        next_gap = times[i + 1] - times[i] if i + 1 < n else float("inf")
-        dense.append(min(prev_gap, next_gap) <= dense_gap)
+    # Two band maps: a dense run keeps to the inner four keys, a sparse line
+    # uses the whole field. Both split the notes evenly by count.
+    inner = charts.pitch_bands([melody[i].midi for i in range(n) if dense[i]],
+                               lanes=charts.INNER)
+    outer = charts.pitch_bands([note.midi for note in melody], 6)
 
-    # Repeated pitches alternate lanes so runs never pile up on one key. The
-    # alternation applies up to one beat apart; longer gaps start fresh.
-    spread_gap = 60.0 / bpm
     lanes: List[int] = [0] * n
-    last = -1
-    last_time = 0.0
+    last, last_time = -1, 0.0
     for i, note in enumerate(melody):
         if dense[i]:
-            lane = 1 + int((note.midi - lo) * 4 / (span + 1))
-            lane = max(1, min(4, lane))
-            low, high = 1, 4
+            lane, low, high = inner[note.midi], 1, 4
         else:
-            lane = int((note.midi - lo) * 6 / (span + 1))
-            lane = max(0, min(5, lane))
-            low, high = 0, 5
-        if lane == last and note.time - last_time <= spread_gap:
+            lane, low, high = outer[note.midi], 0, 5
+        if lane == last and note.time - last_time <= spb:
             options = [alt for alt in (lane - 1, lane + 1)
                        if low <= alt <= high]
-            options.sort(key=lambda alt: (alt in (0, 5), abs(alt - lane), alt))
+            options.sort(key=lambda alt: (alt in charts.OUTER,
+                                          abs(alt - lane), alt))
             if options:
                 lane = options[0]
         lanes[i] = lane
-        last = lane
-        last_time = note.time
+        last, last_time = lane, note.time
+
+    # No single hand may carry a long block; crossing adds a note on the inner
+    # lane of the other hand, and the repair pass keeps the run from repeating
+    # a lane without letting a dense note escape to an outer key.
+    def _cross(lane: int) -> int:
+        return max(1, min(4, charts.mirror(lane)))
+
+    lanes = charts.break_hand_blocks(lanes, times, max_run=6,
+                                     beat_gap=0.5, crossing=_cross,
+                                     allowed=charts.INNER)
+    for _ in range(4):
+        repaired = False
+        for i in range(1, n):
+            if lanes[i] != lanes[i - 1]:
+                continue
+            low, high = (1, 4) if dense[i] else (0, 5)
+            options = [alt for alt in (lanes[i] - 1, lanes[i] + 1)
+                       if low <= alt <= high]
+            options.sort(key=lambda alt: (alt in charts.OUTER,
+                                          abs(alt - lanes[i]), alt))
+            if options:
+                lanes[i] = options[0]
+                repaired = True
+        if not repaired:
+            break
 
     # Accent chords: the first beat of every other bar, when the melody holds
     # for at least an eighth, plus the final note. Times are quantised to 32nds
     # so the check does not drift with float accumulation.
     q = bpm * 8.0 / 60.0
+    companion_load = [0] * 6
     chords: List[Tuple[int, int]] = []
     for i, note in enumerate(melody):
         start = round(note.time * q)
@@ -160,27 +188,51 @@ def _turkish_lane_plan(melody: List[Note], bpm: float
         accent = i == n - 1 or ((start - 8) % 32 == 0 and dur >= 4)
         if not accent:
             continue
-        forbidden = {lanes[i]}
+        taken = {lanes[i]}
         if i and times[i] - times[i - 1] <= dense_gap:
-            forbidden.add(lanes[i - 1])
+            taken.add(lanes[i - 1])
         if i + 1 < n and times[i + 1] - times[i] <= dense_gap:
-            forbidden.add(lanes[i + 1])
-        companions = [lane for lane in range(6) if lane not in forbidden]
-        companions.sort(key=lambda lane: (lane in (0, 5), abs(lane - lanes[i])))
-        if companions:
-            chords.append((i, companions[0]))
+            taken.add(lanes[i + 1])
+        allowed = charts.INNER if dense[i] else tuple(range(6))
+        companion = charts.mirror_partner(lanes[i], taken, allowed)
+        if companion is None:
+            companion = charts.pick_partner(lanes[i], taken, companion_load,
+                                            allowed=allowed)
+        if companion is None:
+            continue
+        chords.append((i, companion))
+        companion_load[companion] += 1
     return lanes, chords
 
 
+
 def _turkish_beatmap(song: Song, lead_in: float = 2.0) -> Beatmap:
-    """Chart the Turkish March with spread-out runs and accent chords."""
+    """Chart the Turkish March on the eighth-note skeleton of the right hand.
+
+    The written line runs at sixteen notes to the bar for long stretches, which
+    is twice the canon's pace and five taps a second under one hand.  The chart
+    therefore taps the eighth-note skeleton of those runs: the melody still
+    auto-plays underneath, so the fast passages are heard, but no hand is asked
+    to machine-gun a stream.  The lane plan and the accent chords are rebuilt
+    from the skeleton, so dropping a sixteenth never leaves a stale fingering.
+    """
     melody = song.chart_notes if song.chart_notes is not None else song.notes
     if not melody:
         return Beatmap(song.id, [], lead_in=lead_in)
-    lanes, chords = _turkish_lane_plan(melody, song.bpm)
+    eighth = 30.0 / song.bpm
+    picked = [note for note in melody
+              if abs(note.time / eighth - round(note.time / eighth)) <= 1e-6]
+    # A surviving note now carries the time of the dropped one, otherwise the
+    # accent rule (an eighth-note hold) would stop recognising phrase downbeats.
+    skeleton: List[Note] = []
+    for k, note in enumerate(picked):
+        end = picked[k + 1].time if k + 1 < len(picked) else note.time + note.dur
+        skeleton.append(Note(note.time, note.midi,
+                             max(note.dur, end - note.time)))
+    lanes, chords = _turkish_lane_plan(skeleton, song.bpm)
     notes = [RNote(note.time + lead_in, lanes[i])
-             for i, note in enumerate(melody)]
-    notes.extend(RNote(melody[i].time + lead_in, lane) for i, lane in chords)
+             for i, note in enumerate(skeleton)]
+    notes.extend(RNote(skeleton[i].time + lead_in, lane) for i, lane in chords)
     notes.sort(key=lambda r: (r.time, r.lane))
     return Beatmap(song.id, notes, lead_in=lead_in)
 
@@ -553,14 +605,6 @@ _CANON_REPEATS = 2
 _CANON_ENTRY_BEATS = 8
 
 
-def _canon_stream(patterns):
-    bank = 0
-    while True:
-        for _ in range(_CANON_REPEATS):
-            yield from patterns[bank % len(patterns)]
-        bank += 1
-
-
 def _canon_beatmap(song: Song, lead_in: float = 2.0) -> Beatmap:
     melody = song.chart_notes if song.chart_notes is not None else song.notes
     spb = 60.0 / song.bpm
@@ -572,8 +616,8 @@ def _canon_beatmap(song: Song, lead_in: float = 2.0) -> Beatmap:
         return min(before, after)
 
     lanes: List[int] = []
-    roll = _canon_stream(_CANON_ROLLS)
-    burst = _canon_stream(_CANON_BURSTS)
+    roll = charts.pattern_stream(_CANON_ROLLS, _CANON_REPEATS)
+    burst = charts.pattern_stream(_CANON_BURSTS, _CANON_REPEATS)
     for i, n in enumerate(melody):
         g = gap(i)
         dense = g <= 0.25 * spb + 1e-9
@@ -617,20 +661,19 @@ def _canon_beatmap(song: Song, lead_in: float = 2.0) -> Beatmap:
         t = melody[i].time
         k = slot[t]
         lane = lanes[i]
-        # Mirroring across the field pairs opposite hands; neighbouring lanes
-        # are excluded so the chord never forces the same key twice in a row.
+        # Mirroring across the field pairs opposite hands, so the chord is the
+        # same shape on both sides; neighbouring lanes are excluded so the
+        # chord never forces the same key twice in a row.
         taken = {lane}
         if k > 0:
             taken |= set(events[times[k - 1]])
         if k + 1 < len(times):
             taken |= set(events[times[k + 1]])
-        partners = (5 - lane, 1, 2, 3, 4)
-        if gap(i) > 0.25 * spb + 1e-9:
-            partners += (0, 5)
-        for partner in partners:
-            if partner not in taken:
-                events[t].append(partner)
-                break
+        allowed = (charts.INNER if gap(i) <= 0.25 * spb + 1e-9
+                   else tuple(range(6)))
+        partner = charts.mirror_partner(lane, taken, allowed)
+        if partner is not None:
+            events[t].append(partner)
 
     notes = [RNote(t + lead_in, lane) for t in times for lane in sorted(events[t])]
     return Beatmap(song.id, notes, lead_in=lead_in)
@@ -810,6 +853,94 @@ for _start, _accents in ((0.0, _MINUET_ACCENTS_A), (48.0, _MINUET_ACCENTS_A),
 _minuet_chart.sort(key=lambda n: n.time)
 register(Song("minuet_g", "G 大调小步舞曲", "Minuet in G", _MINUET_BPM,
               _minuet_notes, chart_notes=_minuet_chart, timbre="pling"))
+
+
+def _minuet_beatmap(song: Song, lead_in: float = 2.0) -> Beatmap:
+    """Chart the minuet by hand shape rather than by raw pitch.
+
+    A linear pitch mapping reads the stepwise right-hand line straight across
+    the keys, and the tune lives on a handful of neighbouring pitches: nearly
+    half the hits would repeat the previous key and three quarters of the
+    onsets would sit under the left hand.  Banding by note count spreads the
+    same melody over the field, and a fast stepwise line alternates hands, so
+    a run reads as a run instead of one finger tapping.
+
+    Eighth notes and faster stay on the inner four keys (`S D J K`) exactly as
+    the canon chart does; the outer keys are kept for isolated notes with time
+    to react, so no dense run asks a hand to stretch out to `A` or `L`.
+    """
+    melody = song.chart_notes if song.chart_notes is not None else song.notes
+    if not melody:
+        return Beatmap(song.id, [], lead_in=lead_in)
+    spb = 60.0 / song.bpm
+    band = charts.pitch_bands([n.midi for n in melody], 6)
+
+    # The accent harmony notes share a time with a melody note: one onset, two
+    # taps.  Keep them grouped so the chord is planned as a chord.
+    groups: List[List[int]] = []
+    group_times: List[float] = []
+    for i, note in enumerate(melody):
+        if group_times and abs(note.time - group_times[-1]) < 1e-9:
+            groups[-1].append(i)
+        else:
+            groups.append([i])
+            group_times.append(note.time)
+
+    loads = [0] * 6
+    # The outer keys may carry at most a tenth of the notes; past that every
+    # note stays inside the middle four, whatever the pitch band says.
+    outer_quota = len(melody) // 10
+    # Density is the smaller of the two neighbouring gaps, so a note is dense
+    # when it belongs to a run rather than merely following one.
+    group_gap: List[float] = []
+    for k, t in enumerate(group_times):
+        before = t - group_times[k - 1] if k else math.inf
+        after = group_times[k + 1] - t if k + 1 < len(group_times) else math.inf
+        group_gap.append(min(before, after))
+    previous: List[int] = []
+    previous_hand: Optional[bool] = None
+    planned: List[List[int]] = []
+    for k, idxs in enumerate(groups):
+        # An eighth note or faster is dense: keep it inside the middle four.
+        fast = group_gap[k] <= spb * 0.5 + 1e-9
+        roomy = not fast and loads[0] + loads[5] < outer_quota
+        allowed = tuple(range(6)) if roomy else charts.INNER
+        picked: List[int] = []
+        for i in idxs:
+            base = band[melody[i].midi]
+            if not roomy:
+                base = max(1, min(4, base))
+            if picked:
+                # The second key of an accent chord mirrors the first: both
+                # hands make the same shape on opposite sides of the middle.
+                partner = charts.mirror_partner(
+                    picked[0], set(picked) | set(previous), allowed)
+                if partner is not None:
+                    picked.append(partner)
+                    continue
+            options = [lane for lane in allowed if abs(lane - base) <= 2]
+            if not options:
+                options = list(allowed)
+            options.sort(key=lambda lane: (
+                lane in previous,           # never repeat the last onset
+                lane in picked,             # never twice in one chord
+                fast and previous_hand is not None
+                and charts.is_left(lane) == previous_hand,
+                loads[lane],
+                abs(lane - base),
+                lane,
+            ))
+            picked.append(options[0])
+        for lane in picked:
+            loads[lane] += 1
+        planned.append(picked)
+        previous = picked
+        previous_hand = charts.is_left(picked[0])
+
+    notes = [RNote(group_times[k] + lead_in, lane)
+             for k, lanes in enumerate(planned) for lane in sorted(lanes)]
+    notes.sort(key=lambda r: (r.time, r.lane))
+    return Beatmap(song.id, notes, lead_in=lead_in)
 
 
 # 土耳其进行曲 / Turkish March — the complete Rondo alla Turca from Mozart's
@@ -1517,43 +1648,24 @@ for _group in _fur_elise_onsets.values():
 
 
 def _fur_elise_lane_of_pitch(leads: List[int]) -> Dict[int, int]:
-    """Map pitches to six bands with a balanced note count."""
-    counts = Counter(leads)
-    pitches = sorted(counts)
-    prefix = [0]
-    for pitch in pitches:
-        prefix.append(prefix[-1] + counts[pitch])
+    """Map pitches to six contiguous bands with a balanced note count.
 
-    # best[k][i]: the smallest possible largest band when the first i pitches
-    # form k bands. Contiguous bands keep the low-to-high left-to-right layout.
-    inf = float("inf")
-    best = [[inf] * (len(pitches) + 1) for _ in range(7)]
-    cut = [[0] * (len(pitches) + 1) for _ in range(7)]
-    best[0][0] = 0
-    for k in range(1, 7):
-        for i in range(1, len(pitches) + 1):
-            for j in range(k - 1, i):
-                load = max(best[k - 1][j], prefix[i] - prefix[j])
-                if load < best[k][i]:
-                    best[k][i] = load
-                    cut[k][i] = j
-
-    bands = []
-    i = len(pitches)
-    for k in range(6, 0, -1):
-        j = cut[k][i]
-        bands.append((pitches[j], pitches[i - 1]))
-        i = j
-    bands.reverse()
-
-    lane_of = {}
+    The bands are cut by dynamic programming (see `charts.pitch_bands`) so each
+    band carries the same number of taps: a proportional cut would leave the
+    top band half empty because the melody is sparse up there.
+    """
+    band = charts.pitch_bands(leads, 6)
+    if not band:
+        return {pitch: 0 for pitch in range(128)}
+    pitches = sorted(band)
+    lane_of: Dict[int, int] = {}
     for pitch in range(128):
-        lane = 0 if pitch < bands[0][0] else 5
-        for index, (lo, hi) in enumerate(bands):
-            if lo <= pitch <= hi:
-                lane = index
-                break
-        lane_of[pitch] = lane
+        if pitch < pitches[0]:
+            lane_of[pitch] = band[pitches[0]]
+        elif pitch > pitches[-1]:
+            lane_of[pitch] = band[pitches[-1]]
+        else:
+            lane_of[pitch] = band[pitches[bisect_right(pitches, pitch) - 1]]
     return lane_of
 
 
@@ -1561,11 +1673,25 @@ def _fur_elise_chart() -> Tuple[List[Note], List[int]]:
     """Balance the falling chart across six lanes without changing the music.
 
     The top right-hand note stays the primary tap. Chord onsets and one downbeat
-    every four bars gain a second tap. A lane may shift one band when its band is
-    crowded or when the same lane would appear on three onsets in a row.
+    every four bars gain a second tap, mirrored so the two hands make the same
+    shape. An eighth note or faster stays on the inner four keys, exactly like
+    the canon chart; the outer keys take only isolated long notes, so a dense
+    run never stretches a hand out to `A` or `L`. A fast run that has stayed on
+    one hand for more than six notes lends a note to the other hand, because the
+    repeated A section climbs into the top band and following the pitch there
+    would ask two right-hand fingers for six notes a second.
     """
     seconds_per_tick = 60.0 / _FUR_ELISE_BPM / _FUR_ELISE_PPQ
+    spb = 60.0 / _FUR_ELISE_BPM
     starts = sorted(_fur_elise_onsets)
+    # Density uses the smaller neighbouring gap, matching the other charts: a
+    # note is dense when it belongs to a run, not merely when it follows one.
+    onset_gap: List[float] = []
+    for k, start in enumerate(starts):
+        before = (start - starts[k - 1]) * seconds_per_tick if k else math.inf
+        after = ((starts[k + 1] - start) * seconds_per_tick
+                 if k + 1 < len(starts) else math.inf)
+        onset_gap.append(min(before, after))
     lane_of = _fur_elise_lane_of_pitch(
         [max(_fur_elise_onsets[start])[0] for start in starts])
     left_onsets: Dict[int, List[tuple]] = {}
@@ -1574,24 +1700,55 @@ def _fur_elise_chart() -> Tuple[List[Note], List[int]]:
 
     counts = [0] * 6
     recent: List[set] = []
+    previous: List[int] = []
     notes: List[Note] = []
     lanes: List[int] = []
+    streak = 0
+    streak_hand: Optional[bool] = None
+    outer_quota = len(starts) // 8
 
     def blocked(lane: int) -> bool:
         return len(recent) >= 2 and lane in recent[-1] and lane in recent[-2]
 
-    for start in starts:
+    for k, start in enumerate(starts):
         group = _fur_elise_onsets[start]
         midi, duration = group[-1]
+        fast = onset_gap[k] <= spb * 0.5 + 1e-9
+        roomy = not fast and counts[0] + counts[5] < outer_quota
+        allowed = tuple(range(6)) if roomy else charts.INNER
         base = lane_of[midi]
-        # 15 is roughly the load worth trading for a one-lane shift.
-        order = sorted(range(6), key=lambda lane: (
+        if not roomy:
+            base = max(1, min(4, base))
+        # 15 is roughly the load worth trading for a one-lane shift. Repeating
+        # the previous onset's key is the last resort: on a dense inner-four
+        # chart a same-key repeat reads as a stutter, not as a melody.
+        order = sorted(allowed, key=lambda lane: (
+            lane in previous,
             abs(lane - base) * 15 + counts[lane], abs(lane - base), lane))
         primary = next((lane for lane in order if not blocked(lane)), order[0])
+
+        # A fast run that has stayed on one hand for more than six notes gets a
+        # note on the other hand, without disturbing the rest of the chart.
+        if streak_hand is not None and (primary < 3) == streak_hand:
+            streak += 1
+        else:
+            streak = 1
+            streak_hand = primary < 3
+        if fast and streak > 6:
+            crossed = [lane for lane in allowed
+                       if (lane < 3) != streak_hand and not blocked(lane)]
+            if crossed:
+                crossed.sort(key=lambda lane: (abs(lane - base),
+                                               counts[lane], lane))
+                primary = crossed[0]
+                streak = 1
+                streak_hand = primary < 3
+
         taps = [(midi, duration, primary)]
 
         # Mark the written chords and the first beat of every fourth bar. Use a
-        # left-hand note for the second pitch where the score has one.
+        # left-hand note for the second pitch where the score has one, and
+        # mirror the primary so the chord is the same shape on both hands.
         if len(group) > 1 or start % (12 * _FUR_ELISE_PPQ) == 2 * _FUR_ELISE_PPQ:
             if len(group) > 1:
                 extra_midi, extra_duration = group[-2]
@@ -1599,13 +1756,18 @@ def _fur_elise_chart() -> Tuple[List[Note], List[int]]:
                 extra_midi, extra_duration = max(left_onsets[start])
             else:
                 extra_midi, extra_duration = midi, duration
-            natural = lane_of[extra_midi]
-            rest = sorted((lane for lane in range(6) if lane != primary),
-                          key=lambda lane: (counts[lane],
-                                            0 if abs(lane - primary) >= 2 else 1,
-                                            abs(lane - natural),
-                                            abs(lane - primary), lane))
-            secondary = next((lane for lane in rest if not blocked(lane)), rest[0])
+            available = [lane for lane in allowed
+                         if lane != primary and not blocked(lane)
+                         and lane not in previous]
+            secondary = charts.mirror_partner(primary, {primary}, available)
+            if secondary is None:
+                natural = lane_of[extra_midi]
+                rest = sorted((lane for lane in available),
+                              key=lambda lane: (counts[lane],
+                                                abs(lane - natural),
+                                                abs(lane - primary), lane))
+                secondary = next((lane for lane in rest if not blocked(lane)),
+                                 rest[0])
             taps.append((extra_midi, extra_duration, secondary))
 
         for tap_midi, tap_duration, lane in taps:
@@ -1613,7 +1775,8 @@ def _fur_elise_chart() -> Tuple[List[Note], List[int]]:
                               tap_duration * seconds_per_tick))
             lanes.append(lane)
             counts[lane] += 1
-        recent.append({lane for _, _, lane in taps})
+        previous = [lane for _, _, lane in taps]
+        recent.append(set(previous))
     return notes, lanes
 
 
@@ -1652,6 +1815,8 @@ BEATMAPS: Dict[str, Beatmap] = {}
 for _sid in ORDER:
     if _sid == "turkish_march":
         BEATMAPS[_sid] = _turkish_beatmap(SONGS[_sid])
+    elif _sid == "minuet_g":
+        BEATMAPS[_sid] = _minuet_beatmap(SONGS[_sid])
     else:
         BEATMAPS[_sid] = beatmap_from_song(SONGS[_sid])
 BEATMAPS["canon"] = _canon_beatmap(SONGS["canon"])

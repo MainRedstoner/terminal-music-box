@@ -393,12 +393,16 @@ class TurkishMarch(Game):
     def test_the_chart_is_the_right_hand_melody(self):
         g = self.game
         self.assertEqual(g.beatmap.song_id, "turkish_march")
-        self.assertGreaterEqual(len(g.notes), len(g.song.chart_notes))
+        # The chart taps the eighth-note skeleton of the written right hand, so
+        # every falling note lands on a written note but not every written note
+        # becomes a tap.
+        self.assertGreater(len(g.notes), 400)
+        self.assertLess(len(g.notes), len(g.song.chart_notes))
         self.assertLess(len(g.notes), len(g.song.notes))
-        self.assertEqual(
-            {round(n.time, 6) for n in g.notes},
-            {round(n.time + g.beatmap.lead_in, 6)
-             for n in g.song.chart_notes},
+        self.assertTrue(
+            {round(n.time, 6) for n in g.notes}
+            <= {round(n.time + g.beatmap.lead_in, 6)
+                for n in g.song.chart_notes}
         )
 
     def test_an_accent_chord_judges_both_notes(self):
