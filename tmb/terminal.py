@@ -94,8 +94,12 @@ class Terminal:
             sys.stdout.flush()
 
     def render(self, screen: Screen) -> None:
-        self.write(screen.render())
-        self.flush()
+        # An empty diff means nothing changed; writing/flushing it anyway
+        # would wake the console for zero bytes every idle frame.
+        data = screen.render()
+        if data:
+            self.write(data)
+            self.flush()
 
     def poll(self, timeout: float) -> List[Event]:
         return self.backend.poll(timeout)

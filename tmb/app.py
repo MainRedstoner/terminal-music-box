@@ -1,6 +1,7 @@
 """Application: state machine + main loop tying terminal, audio and screens."""
 from __future__ import annotations
 
+import gc
 import time
 from typing import Callable, Dict, Optional
 
@@ -9,6 +10,12 @@ from .events import KeyEvent, MouseEvent, ResizeEvent
 from .theme import theme_for
 from .ui import draw_loading_overlay
 from .audio.engine import AudioEngine
+
+FRAME = 1.0 / 60.0  # frame budget: pacing pins the cadence to this instead of
+                    # to the input wait plus however long a frame happened to take
+POLL_MAX = 0.010    # the poll must return *before* the deadline so the pacer
+                    # owns the frame tail; the cap also bounds how far a coarse
+                    # timer wake can push a frame past its budget
 
 
 class App:
@@ -28,6 +35,8 @@ class App:
         # perf_counter, not monotonic: on Windows monotonic() is GetTickCount64
         # with a 15.6 ms resolution, which quantises every frame delta.
         self._last = time.perf_counter()
+        # Wall-clock deadline of the current frame (None outside run()).
+        self._deadline: Optional[float] = None
 
     def register(self, name: str, factory: Callable) -> None:
         self._factories[name] = factory
@@ -81,10 +90,18 @@ class App:
         arrived instead of the previous frame (measured ~25 ms stale on
         Windows). Input is polled first so the frame delta covers the wait; a
         caller (tests, scripts) can still pass an explicit dt.
+
+        When run() drives the loop, the poll wait is capped so it always ends
+        before the frame deadline: waiting the full frame would push every
+        render past its deadline and leave the pacer nothing to sleep off.
         """
         if not self.running:
             return
-        events = self.terminal.poll(0.016)
+        timeout = 0.016
+        if dt is None and self._deadline is not None:
+            remain = self._deadline - time.perf_counter()
+            timeout = POLL_MAX if remain <= 0.0 else min(POLL_MAX, remain)
+        events = self.terminal.poll(timeout)
         if dt is None:
             now = time.perf_counter()
             dt = min(0.1, now - self._last)
@@ -119,10 +136,27 @@ class App:
         self.audio.start()
         self._preload_timbre()
         self.navigate("menu")
+        # Startup objects (config, theme, menu screen, synth tables) live for
+        # the whole process; freeze() moves them out of every future
+        # collection scan. gen0 is also relaxed: collections can land on the
+        # mixer thread, and a stop-the-world pause there is one missed chunk
+        # deadline (an audible click) plus one late frame on the UI thread.
+        gc.collect()
+        gc.freeze()
+        gc.set_threshold(20000, 25, 25)
         self._last = time.perf_counter()
+        self._deadline = self._last + FRAME
         try:
             while self.running:
                 self.step()
+                remain = self._deadline - time.perf_counter()
+                if remain > 0.0:
+                    time.sleep(remain)
+                    self._deadline += FRAME
+                else:
+                    # Budget blown (slow frame, stall): re-anchor instead of
+                    # accumulating debt and bursting catch-up frames.
+                    self._deadline = time.perf_counter() + FRAME
         finally:
             self._diag("run loop exited")
             self.audio.stop()

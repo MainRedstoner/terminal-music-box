@@ -3,7 +3,10 @@
 A Screen is a grid of cells (char, fg, bg, bold). Wide (CJK) characters occupy
 two columns; the trailing column is marked as a continuation cell and skipped
 when rendering. Rendering only redraws rows that changed since the last frame,
-which keeps SSH / serial output on a Raspberry Pi cheap.
+which keeps SSH / serial output on a Raspberry Pi cheap, and restates only the
+style attributes that actually changed (minimal SGR) — a full reset + complete
+restyle per transition roughly doubles the stream, and ConPTY parses every
+byte of every frame.
 """
 from __future__ import annotations
 
@@ -56,17 +59,31 @@ def text_width(s: str) -> int:
     return sum(char_width(c) for c in s)
 
 
-def _sgr(fg: Optional[int], bg: Optional[int], bold: bool) -> str:
-    codes = []
-    if bold:
-        codes.append("1")
-    if fg is not None:
-        codes.append("38;5;%d" % fg)
-    if bg is not None:
-        codes.append("48;5;%d" % bg)
-    if not codes:
-        return "\x1b[0m"
-    return "\x1b[0m\x1b[" + ";".join(codes) + "m"
+@lru_cache(maxsize=64)
+def _fg_seq(fg: Optional[int]) -> str:
+    return "\x1b[39m" if fg is None else "\x1b[38;5;%dm" % fg
+
+
+@lru_cache(maxsize=64)
+def _bg_seq(bg: Optional[int]) -> str:
+    return "\x1b[49m" if bg is None else "\x1b[48;5;%dm" % bg
+
+
+def _sgr_delta(pfg: Optional[int], pbg: Optional[int], pbold: bool,
+               fg: Optional[int], bg: Optional[int], bold: bool) -> str:
+    """Minimal SGR: restate only the attributes that actually changed.
+
+    Cached sequence strings: the same handful of styles repeat hundreds of
+    times per frame across the grid.
+    """
+    seq = []
+    if bold != pbold:
+        seq.append("\x1b[1m" if bold else "\x1b[22m")
+    if fg != pfg:
+        seq.append(_fg_seq(fg))
+    if bg != pbg:
+        seq.append(_bg_seq(bg))
+    return "".join(seq)
 
 
 class Screen:
@@ -86,7 +103,17 @@ class Screen:
         self._force = True
 
     def clear(self) -> None:
-        self.cells = [[DEFAULT_CELL for _ in range(self.w)] for _ in range(self.h)]
+        # Reset the existing row lists in place via slice assignment. The old
+        # scheme rebuilt every row list per frame, churning w*h slots of
+        # garbage that showed up as periodic GC hitches (dropped frames) in
+        # the rhythm game.
+        blank = [DEFAULT_CELL] * self.w
+        rows = self.cells
+        if len(rows) != self.h:
+            self.cells = [blank[:] for _ in range(self.h)]
+        else:
+            for row in rows:
+                row[:] = blank
 
     def in_bounds(self, x: int, y: int) -> bool:
         return 0 <= x < self.w and 0 <= y < self.h
@@ -124,16 +151,29 @@ class Screen:
             self.put(xx, y, ch, fg, bg)
 
     def render(self) -> str:
-        """Return the ANSI escape string that updates the terminal."""
-        out = ["\x1b[?25l"]  # hide cursor while drawing
+        """Return the ANSI escape string that updates the terminal.
+
+        Only rows that changed are emitted, and each style transition restates
+        only the attributes that differ from what the terminal is currently
+        showing. An empty string means nothing changed at all — the caller
+        should not flush anything.
+        """
+        out = []
         prev = self._prev
         force = self._force or len(prev) != self.h
+        emitted = False
+        # Terminal attribute state; the leading reset makes it a known
+        # baseline for every frame, so no per-row trailing reset is needed.
+        pfg = pbg = None
+        pbold = False
         for y in range(self.h):
             row = self.cells[y]
             if not force and y < len(prev) and prev[y] == row:
                 continue
+            if not emitted:
+                out.append("\x1b[0m")
+                emitted = True
             out.append("\x1b[%d;1H" % (y + 1))
-            style = (None, None, False)
             buf = []
             x = 0
             while x < self.w:
@@ -141,19 +181,24 @@ class Screen:
                 if ch == CONT:
                     x += 1
                     continue
-                st = (fg, bg, bold)
-                if st != style:
+                if fg != pfg or bg != pbg or bold != pbold:
                     if buf:
                         out.append("".join(buf))
                         buf = []
-                    out.append(_sgr(fg, bg, bold))
-                    style = st
+                    out.append(_sgr_delta(pfg, pbg, pbold, fg, bg, bold))
+                    pfg, pbg, pbold = fg, bg, bold
                 buf.append(ch if ch else " ")
                 x += 1
             if buf:
                 out.append("".join(buf))
-            out.append("\x1b[0m")
-        self._prev = [row[:] for row in self.cells]
+        if not emitted:
+            return ""
+        # Snapshot for the next diff, reusing the previous row lists.
+        if len(prev) == self.h:
+            for p, row in zip(prev, self.cells):
+                p[:] = row
+        else:
+            self._prev = [row[:] for row in self.cells]
         self._force = False
         return "".join(out)
 

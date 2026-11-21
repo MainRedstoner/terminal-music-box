@@ -99,8 +99,8 @@ class Render(unittest.TestCase):
         s.text(0, 0, "hello", C.green)
         first = s.render()
         self.assertIn("hello", first)
-        self.assertEqual(s.render(), "\x1b[?25l")
-        self.assertEqual(s.render(), "\x1b[?25l")
+        self.assertEqual(s.render(), "")
+        self.assertEqual(s.render(), "")
 
     def test_only_the_changed_row_is_redrawn(self):
         s = Screen(20, 4)
@@ -134,10 +134,21 @@ class Render(unittest.TestCase):
         s = Screen(6, 1)
         s.text(0, 0, "x", C.gold, C.panel, True)
         out = s.render()
-        self.assertIn("\x1b[1;38;5;%d;48;5;%dm" % (C.gold, C.panel), out)
+        # Minimal SGR: bold, fg and bg are restated as separate deltas.
+        self.assertIn("\x1b[1m", out)
+        self.assertIn("\x1b[38;5;%dm" % C.gold, out)
+        self.assertIn("\x1b[48;5;%dm" % C.panel, out)
 
-    def test_render_hides_cursor(self):
-        self.assertTrue(Screen(4, 1).render().startswith("\x1b[?25l"))
+    def test_style_delta_only_restates_changes(self):
+        s = Screen(4, 1)
+        s.text(0, 0, "a", C.red, None, True)
+        s.text(1, 0, "b")  # back to default: bold off + fg default
+        out = s.render()
+        self.assertIn("38;5;%d" % C.red, out)
+        self.assertIn("\x1b[22m", out)
+        self.assertIn("\x1b[39m", out)
+        # One reset as the frame baseline; styles are never reset per row.
+        self.assertEqual(out.count("\x1b[0m"), 1)
 
 
 if __name__ == "__main__":

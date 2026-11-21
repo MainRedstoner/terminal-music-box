@@ -69,10 +69,12 @@ class Facade(unittest.TestCase):
         self.term.screen.text(0, 0, "hi")
         self.term.render(self.term.screen)
         self.assertIn("hi", self.text())
+        # Nothing changed: the renderer returns an empty diff and nothing is
+        # flushed (the old per-frame cursor-hide made every frame cost bytes).
         self.term.screen.text(0, 0, "hi")
         before = len(self.text())
         self.term.render(self.term.screen)
-        self.assertEqual(len(self.text()), before + len("\x1b[?25l"))
+        self.assertEqual(len(self.text()), before)
 
     def test_teardown_restores_the_terminal(self):
         self.term.setup()

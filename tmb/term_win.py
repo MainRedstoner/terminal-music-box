@@ -15,6 +15,7 @@ from .events import (KeyEvent, MouseEvent, ResizeEvent, Event,
                      ENTER, ESC, TAB, BACKSPACE, SPACE)
 
 k32 = ct.windll.kernel32
+winmm = ct.windll.winmm
 
 STD_INPUT_HANDLE = -10
 STD_OUTPUT_HANDLE = -11
@@ -30,6 +31,12 @@ WAIT_OBJECT_0 = 0
 MOUSE_MOVED = 0x0001
 MOUSE_WHEELED = 0x0004
 CTRL_MASK = 0x0004 | 0x0008  # right | left ctrl pressed
+# Raise the scheduler tick from 15.6 ms to ~1 ms while the app runs. Without
+# it, WaitForSingleObject timeouts and time.sleep both quantise to the tick
+# (measured: a 10 ms wait actually took 15-16 ms), which oscillates idle frame
+# times between ~16 and ~31 ms. Python < 3.11 needs this; newer interpreters
+# use a high-resolution waitable timer for sleep on their own.
+TIMER_PERIOD_MS = 1
 
 
 class COORD(ct.Structure):
@@ -102,6 +109,7 @@ class WindowsBackend:
         self._buf = (INPUT_RECORD * 256)()
 
     def setup(self) -> None:
+        winmm.timeBeginPeriod(TIMER_PERIOD_MS)
         k32.GetConsoleMode(self._hin, ct.byref(self._old_in))
         k32.GetConsoleMode(self._hout, ct.byref(self._old_out))
         k32.SetConsoleMode(self._hin, ENABLE_WINDOW_INPUT | ENABLE_MOUSE_INPUT | ENABLE_EXTENDED_FLAGS)
@@ -109,8 +117,11 @@ class WindowsBackend:
         self._last_size = self.size()
 
     def teardown(self) -> None:
-        k32.SetConsoleMode(self._hin, self._old_in.value)
-        k32.SetConsoleMode(self._hout, self._old_out.value)
+        try:
+            k32.SetConsoleMode(self._hin, self._old_in.value)
+            k32.SetConsoleMode(self._hout, self._old_out.value)
+        finally:
+            winmm.timeEndPeriod(TIMER_PERIOD_MS)
 
     def size(self):
         info = CONSOLE_SCREEN_BUFFER_INFO()
