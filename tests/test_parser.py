@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import unittest
 
+from unittest import mock
+
 from tmb.events import KeyEvent, MouseEvent
-from tmb.term_posix import _Parser
+from tmb.term_posix import _Parser, under_wsl
 
 
 def keys(events):
@@ -129,6 +131,22 @@ class KittyProtocol(unittest.TestCase):
 
     def test_capability_replies_are_ignored(self):
         self.assertEqual(self.p.feed(b"\x1b[?3u\x1b[?62;1;6c"), [])
+
+
+class UnderWsl(unittest.TestCase):
+    def test_wsl_versions_are_detected(self):
+        for version in ("Linux version 5.15.167.4-microsoft-standard-WSL2",
+                        "Linux version 4.4.0-19001-Microsoft"):
+            with mock.patch("builtins.open", mock.mock_open(
+                    read_data=version), create=True):
+                self.assertTrue(under_wsl())
+
+    def test_native_linux_and_missing_proc_are_not_wsl(self):
+        with mock.patch("builtins.open", mock.mock_open(
+                read_data="Linux version 6.6.62-rpi7 (pi)"), create=True):
+            self.assertFalse(under_wsl())
+        with mock.patch("builtins.open", side_effect=OSError):
+            self.assertFalse(under_wsl())
 
 
 class ParserPending(unittest.TestCase):

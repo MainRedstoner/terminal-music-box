@@ -106,6 +106,17 @@ class Facade(unittest.TestCase):
         self.term.flush()
         self.assertEqual(self.text(), "")
 
+    def test_alt_screen_can_be_opted_out_by_the_backend(self):
+        # WSL/ConPTY drops kitty key releases on the alternate screen, so the
+        # posix backend opts out there; the facade must honour that.
+        self.backend.use_alt_screen = False
+        self.term.setup()
+        out = self.text()
+        self.assertNotIn("\x1b[?1049h", out)
+        self.assertIn("\x1b[?25l", out)  # the rest of setup still runs
+        self.term.teardown()
+        self.assertNotIn("\x1b[?1049l", self.text())
+
 
 class Dispatch(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "term_win only imports on Windows")

@@ -57,6 +57,20 @@ def _event_type(params: str) -> int:
     return 1
 
 
+def under_wsl() -> bool:
+    """True when running under the Windows Subsystem for Linux.
+
+    ConPTY (the terminal layer behind WSL) stops delivering kitty key
+    release events once an application switches to the alternate screen,
+    so there we trade the screen-restore nicety for working key-up events.
+    """
+    try:
+        with open("/proc/version", "r", encoding="utf-8", errors="replace") as f:
+            return "microsoft" in f.read().lower()
+    except OSError:
+        return False
+
+
 class _Parser:
     def __init__(self):
         self._dec = codecs.getincrementaldecoder("utf-8")(errors="replace")
@@ -245,6 +259,10 @@ class PosixBackend:
         termios.tcsetattr(self._fd, termios.TCSANOW, [iflag, oflag, cflag, lflag, ispeed, ospeed, cc])
         self._kitty = self._negotiate_kitty()
         self.release_events = self._kitty
+        # WSL/ConPTY drops kitty releases while on the alternate screen; there
+        # we skip it so key-up events (needed for sustained timbres) keep
+        # flowing. Native terminals deliver releases fine either way.
+        self.use_alt_screen = not (self._kitty and under_wsl())
         try:
             self._old_handler = signal.getsignal(signal.SIGWINCH)
             signal.signal(signal.SIGWINCH, self._on_winch)

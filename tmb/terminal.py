@@ -25,6 +25,7 @@ class Terminal:
         self.backend = backend if backend is not None else make_backend()
         self.screen: Optional[Screen] = None
         self._buf: List[str] = []
+        self._alt = False
 
     def __enter__(self):
         self.setup()
@@ -38,7 +39,12 @@ class Terminal:
         self.backend.setup()
         w, h = self.backend.size()
         self.screen = Screen(w, h)
-        self.write("\x1b[?1049h")   # alternate screen buffer
+        # The alternate screen restores the shell on exit, but ConPTY behind
+        # WSL stops delivering kitty key releases there, so the backend can
+        # opt out (see PosixBackend.use_alt_screen).
+        self._alt = bool(getattr(self.backend, "use_alt_screen", True))
+        if self._alt:
+            self.write("\x1b[?1049h")   # alternate screen buffer
         self.write("\x1b[?25l")     # hide cursor
         self.write(_MOUSE_ON)
         self.write("\x1b[2J\x1b[H")
@@ -48,7 +54,8 @@ class Terminal:
         try:
             self.write(_MOUSE_OFF)
             self.write("\x1b[?25h")   # show cursor
-            self.write("\x1b[?1049l")  # leave alternate screen
+            if self._alt:
+                self.write("\x1b[?1049l")  # leave alternate screen
             self.write("\x1b[0m")
             self.flush()
         finally:
