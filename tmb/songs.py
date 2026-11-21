@@ -27,6 +27,7 @@ class Song:
     bpm: float
     notes: List[Note] = field(default_factory=list)
     chart_notes: Optional[List[Note]] = None  # playable lead line, if different
+    timbre: Optional[str] = None  # locked rhythm-game sound; None = user's timbre
 
     @property
     def duration(self) -> float:
@@ -436,8 +437,9 @@ _canon_notes = sorted(
     key=lambda n: n.time,
 )
 # Only violin I becomes falling notes; the complete four-part score auto-plays.
+# Canon is the rhythm game's song, and its timbre is locked to the didgeridoo.
 register(Song("canon", "卡农", "Canon in C", _CANON_BPM, _canon_notes,
-              chart_notes=_canon_violin_one))
+              chart_notes=_canon_violin_one, timbre="didgeridoo"))
 
 # 摇篮曲 / Brahms' Lullaby (Wiegenlied Op.49 No.4, public domain).
 # Melody verified note-by-note against the tuneonmusic beginner MIDI (C-major
