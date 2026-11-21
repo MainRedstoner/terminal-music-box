@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import unittest
+from collections import Counter
 
 from tmb import songs
 from tmb.audio.backends import NullBackend
@@ -92,6 +93,8 @@ class Library(unittest.TestCase):
 class Beatmaps(unittest.TestCase):
     def test_every_beatmap_matches_its_song(self):
         for sid in songs.ORDER:
+            if sid == "canon":
+                continue  # canon ships an authored chart; see CanonChart
             song = songs.SONGS[sid]
             bm = songs.get_beatmap(sid)
             with self.subTest(song=sid):
@@ -108,7 +111,7 @@ class Beatmaps(unittest.TestCase):
     def test_canon_beatmap_follows_violin_one_not_the_full_ensemble(self):
         song = songs.SONGS["canon"]
         bm = songs.get_beatmap("canon")
-        self.assertEqual(len(bm.notes), 593)
+        self.assertEqual(len(bm.notes), 638)
         self.assertLess(len(bm.notes), len(song.notes))
         self.assertAlmostEqual(bm.notes[0].time, 8 * 60.0 / song.bpm + bm.lead_in)
 
@@ -140,6 +143,92 @@ class Beatmaps(unittest.TestCase):
         song = songs.Song("one", "一", "One", 100, songs.seq([(60, 1), (60, 1)], bpm=100))
         bm = songs.beatmap_from_song(song)
         self.assertEqual({n.lane for n in bm.notes}, {0})
+
+
+class CanonChart(unittest.TestCase):
+    """The authored chart spreads streams over S D J K and accents with chords."""
+
+    def setUp(self):
+        self.song = songs.SONGS["canon"]
+        self.bm = songs.get_beatmap("canon")
+        self.melody = self.song.chart_notes
+        self.spb = 60.0 / self.song.bpm
+        self.events = {}
+        for n in self.bm.notes:
+            self.events.setdefault(n.time, []).append(n.lane)
+        self.times = sorted(self.events)
+
+    def gap(self, i):
+        before = self.melody[i].time - self.melody[i - 1].time if i > 0 else float("inf")
+        after = self.melody[i + 1].time - self.melody[i].time if i < len(self.melody) - 1 else float("inf")
+        return min(before, after)
+
+    def dense_times(self):
+        return {n.time + self.bm.lead_in for i, n in enumerate(self.melody)
+                if self.gap(i) <= 0.25 * self.spb + 1e-9}
+
+    def test_every_melody_note_is_still_a_hit(self):
+        self.assertEqual(set(self.times),
+                         {n.time + self.bm.lead_in for n in self.melody})
+
+    def test_chords_land_on_phrase_accents(self):
+        chords = [t for t in self.times if len(self.events[t]) > 1]
+        self.assertGreaterEqual(len(chords), 30)
+        self.assertLessEqual(len(chords), 60)
+        for t in chords:
+            self.assertEqual(len(self.events[t]), 2)
+            self.assertEqual(len(set(self.events[t])), 2)
+
+    def test_dense_runs_stay_on_the_middle_four_lanes(self):
+        for t in self.dense_times():
+            for lane in self.events[t]:
+                self.assertIn(lane, (1, 2, 3, 4))
+
+    def test_sparse_notes_reach_the_outer_lanes(self):
+        dense = self.dense_times()
+        outer = {lane for t in self.times if t not in dense
+                 for lane in self.events[t]}
+        self.assertEqual(outer & {0, 5}, {0, 5})
+
+    def test_no_lane_repeats_on_consecutive_hits(self):
+        for a, b in zip(self.times, self.times[1:]):
+            self.assertFalse(set(self.events[a]) & set(self.events[b]))
+
+    def test_no_lane_carries_a_pile_of_a_dense_bar(self):
+        for bar in range(50):
+            lo = 8 * self.spb + bar * 4 * self.spb + self.bm.lead_in
+            hits = [lane for t in self.times if lo <= t < lo + 4 * self.spb
+                    for lane in self.events[t]]
+            if len(hits) >= 16:
+                self.assertLessEqual(max(hits.count(l) for l in set(hits)),
+                                     len(hits) // 3)
+
+    def test_middle_lanes_share_the_load_evenly(self):
+        counts = [sum(1 for n in self.bm.notes if n.lane == l) for l in range(1, 5)]
+        self.assertLess(max(counts) - min(counts), 20)
+
+    def test_long_streams_change_their_fingering(self):
+        dense = self.dense_times()
+        seq = [self.events[t][0] for t in self.times if t in dense]
+        windows = Counter(tuple(seq[i:i + 4]) for i in range(len(seq) - 3))
+        self.assertGreater(len(windows), 40)
+        self.assertLess(windows.most_common(1)[0][1] / sum(windows.values()), 0.12)
+
+    def test_the_fastest_bursts_alternate_hands(self):
+        single = {t: ls[0] for t, ls in self.events.items() if len(ls) == 1}
+        idx = [i for i in range(len(self.melody))
+               if self.gap(i) <= 0.125 * self.spb + 1e-9]
+        pairs = [(self.melody[a].time + self.bm.lead_in,
+                  self.melody[b].time + self.bm.lead_in)
+                 for a, b in zip(idx, idx[1:]) if b == a + 1]
+        pairs = [(a, b) for a, b in pairs if a in single and b in single]
+        same = sum(1 for a, b in pairs if (single[a] < 3) == (single[b] < 3))
+        self.assertLess(same / len(pairs), 0.1)
+
+    def test_the_score_itself_is_untouched(self):
+        self.assertEqual(len(self.song.notes), 1956)
+        self.assertEqual(len(self.melody), 593)
+        self.assertAlmostEqual(self.song.duration, 245.34545454545457)
 
 
 class Player(unittest.TestCase):

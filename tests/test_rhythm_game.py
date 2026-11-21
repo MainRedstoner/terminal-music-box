@@ -394,6 +394,34 @@ class TimbreLock(Game):
             self.assertEqual(pn.call_args.args[0], "didgeridoo")
 
 
+class CanonChartPlay(Game):
+    song = "canon"
+
+    def test_both_keys_of_a_chord_score(self):
+        self.start_play()
+        g = self.game
+        i = next(i for i, n in enumerate(g.notes)
+                 if i + 1 < len(g.notes) and g.notes[i + 1].time == n.time)
+        a, b = g.notes[i], g.notes[i + 1]
+        self.assertNotEqual(a.lane, b.lane)
+        self.at(a.time)
+        self.tap(self.lane_key(a))
+        self.tap(self.lane_key(b))
+        self.assertEqual(g.perfect, 2)
+        self.assertEqual(g.combo, 2)
+
+    def test_a_perfect_run_clears_the_whole_authored_chart(self):
+        self.start_play()
+        g = self.game
+        for n in g.notes:
+            self.at(n.time)
+            self.tap(self.lane_key(n))
+        self.run_until(lambda: g.state == "result", dt=0.05)
+        self.assertEqual(g.miss, 0)
+        self.assertEqual(g.perfect, len(g.notes))
+        self.assertEqual(g.grade, "S")
+
+
 class LatencyOffset(Game):
     def test_positive_latency_shifts_the_hit_window(self):
         self.restart(latency_ms=100)

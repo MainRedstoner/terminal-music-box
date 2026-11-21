@@ -97,6 +97,10 @@ Twinkle Twinkle). Songs loop.
   timbre selection.
 - Default keys: `A S D J K L` (6 lanes), rebindable in **Key Config**
   (binding a key already in use swaps the two lanes).
+- Canon's chart is authored: dense phrases use the middle four lanes
+  (`S D J K`), rotating the fingering every couple of cycles so long streams
+  never settle into one loop; isolated notes spread across all six by register,
+  and phrase accents are two-key chords.
 - **Latency Calibration** measures your input offset against a metronome (median
   of 12 taps).
 - `Esc` pauses (only `Esc` during play); the pause menu offers quit or resume,

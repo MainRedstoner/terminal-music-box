@@ -7,6 +7,8 @@ is extended with more public-domain melodies.
 """
 from __future__ import annotations
 
+import math
+from bisect import bisect_right
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -441,6 +443,101 @@ _canon_notes = sorted(
 register(Song("canon", "卡农", "Canon in C", _CANON_BPM, _canon_notes,
               chart_notes=_canon_violin_one, timbre="didgeridoo"))
 
+# Canon's chart is authored rather than pitch-derived: whole bars repeat one
+# pitch, so a pitch mapping stacks 20+ taps on a single lane. Dense runs cycle
+# the middle four lanes (S D J K); isolated notes spread across all six.
+_CANON_LANE_BOUNDS = (62, 66, 70, 74, 79)
+# Each bank rotates every couple of cycles so a long stream never settles into
+# one memorisable loop. Consecutive shapes are ordered so the hand alternation
+# and the lane changes survive the switch.
+_CANON_ROLLS = ((1, 2, 3, 4), (2, 4, 1, 3), (4, 3, 2, 1), (3, 4, 1, 2))
+_CANON_BURSTS = ((1, 3, 2, 4), (2, 4, 1, 3), (1, 4, 2, 3), (2, 3, 1, 4))
+_CANON_REPEATS = 2
+_CANON_ENTRY_BEATS = 8
+
+
+def _canon_stream(patterns):
+    bank = 0
+    while True:
+        for _ in range(_CANON_REPEATS):
+            yield from patterns[bank % len(patterns)]
+        bank += 1
+
+
+def _canon_beatmap(song: Song, lead_in: float = 2.0) -> Beatmap:
+    melody = song.chart_notes if song.chart_notes is not None else song.notes
+    spb = 60.0 / song.bpm
+    count = len(melody)
+
+    def gap(i: int) -> float:
+        before = melody[i].time - melody[i - 1].time if i > 0 else math.inf
+        after = melody[i + 1].time - melody[i].time if i < count - 1 else math.inf
+        return min(before, after)
+
+    lanes: List[int] = []
+    roll = _canon_stream(_CANON_ROLLS)
+    burst = _canon_stream(_CANON_BURSTS)
+    for i, n in enumerate(melody):
+        g = gap(i)
+        dense = g <= 0.25 * spb + 1e-9
+        if g <= 0.125 * spb + 1e-9:
+            lane = next(burst)
+        elif dense:
+            lane = next(roll)
+        else:
+            lane = bisect_right(_CANON_LANE_BOUNDS, n.midi)
+        if lanes and lane == lanes[-1]:
+            lane = 1 + lane % 4 if dense else (lane + 1 if lane < 5 else lane - 1)
+        lanes.append(lane)
+
+    entry = _CANON_ENTRY_BEATS * spb
+    bar = 4 * spb
+    bar_count = int((melody[-1].time - entry) / bar) + 1
+    bars: List[List[int]] = [[] for _ in range(bar_count)]
+    for i, n in enumerate(melody):
+        bars[int((n.time - entry) / bar + 1e-9)].append(i)
+
+    accents = {count - 1}
+    for b, idx in enumerate(bars):
+        if not idx:
+            continue
+        downbeat = abs(melody[idx[0]].time - (entry + b * bar)) < 1e-6
+        if downbeat and (b % 4 == 0 or len(idx) <= 8):
+            accents.add(idx[0])
+    for b in range(0, bar_count, 4):
+        idx = [i for k in range(b, min(b + 4, bar_count)) for i in bars[k]]
+        if idx:
+            peak = max(idx, key=lambda i: melody[i].midi)
+            if gap(peak) > 0.125 * spb + 1e-9:
+                accents.add(peak)
+
+    events: Dict[float, List[int]] = {}
+    for i, lane in enumerate(lanes):
+        events.setdefault(melody[i].time, []).append(lane)
+    times = sorted(events)
+    slot = {t: k for k, t in enumerate(times)}
+    for i in sorted(accents):
+        t = melody[i].time
+        k = slot[t]
+        lane = lanes[i]
+        # Mirroring across the field pairs opposite hands; neighbouring lanes
+        # are excluded so the chord never forces the same key twice in a row.
+        taken = {lane}
+        if k > 0:
+            taken |= set(events[times[k - 1]])
+        if k + 1 < len(times):
+            taken |= set(events[times[k + 1]])
+        partners = (5 - lane, 1, 2, 3, 4)
+        if gap(i) > 0.25 * spb + 1e-9:
+            partners += (0, 5)
+        for partner in partners:
+            if partner not in taken:
+                events[t].append(partner)
+                break
+
+    notes = [RNote(t + lead_in, lane) for t in times for lane in sorted(events[t])]
+    return Beatmap(song.id, notes, lead_in=lead_in)
+
 # 摇篮曲 / Brahms' Lullaby (Wiegenlied Op.49 No.4, public domain).
 # Melody verified note-by-note against the tuneonmusic beginner MIDI (C-major
 # transposition of the Eb original); rhythm taken from that MIDI.
@@ -470,6 +567,7 @@ register(Song("london_bridge", "伦敦桥", "London Bridge", 100, seq([
 BEATMAPS: Dict[str, Beatmap] = {}
 for _sid in ORDER:
     BEATMAPS[_sid] = beatmap_from_song(SONGS[_sid])
+BEATMAPS["canon"] = _canon_beatmap(SONGS["canon"])
 
 
 def get_beatmap(sid: str) -> Beatmap:
