@@ -92,7 +92,8 @@ Z X C V B N M   —— 低音 (C3..B3)
 
 ## 内置曲目
 
-全部为公有领域旋律,共 8 首。胎教模式可使用全部曲目;音游模式仅保留完整版《卡农》,下落谱面跟随小提琴 I:
+全部为公有领域旋律,共 9 首。胎教模式可使用全部曲目;音游模式提供完整版《卡农》
+(下落谱面跟随小提琴 I)与《G 大调小步舞曲》(保留 AABB 反复,右手旋律附带重音双押):
 
 | 曲目 | 英文 |
 | --- | --- |
@@ -102,12 +103,17 @@ Z X C V B N M   —— 低音 (C3..B3)
 | 铃儿响叮当 | Jingle Bells |
 | 祝你生日快乐 | Happy Birthday |
 | 卡农 | Canon in C |
+| G 大调小步舞曲 | Minuet in G |
 | 摇篮曲 | Brahms' Lullaby |
 | 伦敦桥 | London Bridge |
 
 《卡农》依据 [Mutopia-2015/09/02-2047](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=2047)
 的三小提琴与低音完整乐谱移调至 C,排版者 Michael Fischer v. Mollard,依据
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) 使用。
+
+《G 大调小步舞曲》(BWV Anh. 114,Christian Petzold)依据
+[Mutopia-2017/01/19-75](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=75)
+的公有领域双谱表乐谱,保留两段反复与装饰音。
 
 ## 架构
 

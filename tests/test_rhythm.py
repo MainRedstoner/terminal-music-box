@@ -18,10 +18,11 @@ class RhythmMenu(HeadlessCase):
     def test_shows_a_large_song_box_and_a_small_function_box(self):
         th = self.app.theme
         self.assertEqual(self.screen.focus, 0)
-        self.assertEqual(self.screen.song_ids, ["canon"])
+        self.assertEqual(self.screen.song_ids, ["canon", "minuet_g"])
         self.assertIn(th.t("rhythm.list"), self.frame)
         self.assertIn(th.t("rhythm.functions"), self.frame)
         self.assertIn(songs.SONGS["canon"].title("zh"), self.frame)
+        self.assertIn(songs.SONGS["minuet_g"].title("zh"), self.frame)
         self.assertIn(th.t("rhythm.calibration"), self.frame)
         self.assertIn(th.t("rhythm.keys"), self.frame)
 
@@ -30,10 +31,17 @@ class RhythmMenu(HeadlessCase):
         self.assertEqual(self.app.current_name, "rhythm_game")
         self.assertEqual(self.screen.song_id, "canon")
 
-    def test_mouse_click_on_the_song_starts_it(self):
-        self.click_label(songs.SONGS["canon"].title("zh"))
+    def test_down_selects_minuet_and_enter_starts_it(self):
+        self.press("down")
+        self.assertEqual(self.screen.song_index, 1)
+        self.press("enter")
         self.assertEqual(self.app.current_name, "rhythm_game")
-        self.assertEqual(self.screen.song_id, "canon")
+        self.assertEqual(self.screen.song_id, "minuet_g")
+
+    def test_mouse_click_on_the_song_starts_it(self):
+        self.click_label(songs.SONGS["minuet_g"].title("zh"))
+        self.assertEqual(self.app.current_name, "rhythm_game")
+        self.assertEqual(self.screen.song_id, "minuet_g")
 
     def test_left_right_and_tab_switch_focus(self):
         self.assertEqual(self.screen.focus, 0)

@@ -365,6 +365,24 @@ class PauseAndResult(Game):
         self.assertEqual(self.app.current_name, "rhythm_menu")
 
 
+class Minuet(Game):
+    song = "minuet_g"
+
+    def test_downbeat_plays_the_full_score_and_accepts_the_double_hit(self):
+        self.start_play()
+        g = self.game
+        with mock.patch.object(self.engine, "play_note",
+                               wraps=self.engine.play_note) as pn:
+            self.at(g.notes[0].time)
+            self.assertEqual(pn.call_count, 4)
+            downbeat = [n for n in g.notes if n.time == g.notes[0].time]
+            self.assertEqual(len(downbeat), 2)
+            for note in downbeat:
+                self.press(self.lane_key(note))
+            self.assertEqual(g.perfect, 2)
+            self.assertEqual(pn.call_count, 4)
+
+
 class TimbreLock(Game):
     song = "canon"
 

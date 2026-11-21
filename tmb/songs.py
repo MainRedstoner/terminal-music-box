@@ -151,7 +151,7 @@ class SongPlayer:
 # Library --------------------------------------------------------------------
 SONGS: Dict[str, Song] = {}
 ORDER: List[str] = []
-RHYTHM_ORDER: List[str] = ["canon"]
+RHYTHM_ORDER: List[str] = ["canon", "minuet_g"]
 
 
 def register(song: Song) -> Song:
@@ -537,6 +537,182 @@ def _canon_beatmap(song: Song, lead_in: float = 2.0) -> Beatmap:
 
     notes = [RNote(t + lead_in, lane) for t in times for lane in sorted(events[t])]
     return Beatmap(song.id, notes, lead_in=lead_in)
+
+# Minuet in G, BWV Anh. 114 (Christian Petzold): complete AABB score.
+_MINUET_BPM = 140.0
+_MINUET_MELODY_A = [
+    # Bar 1
+    (74, 1), (67, 0.5), (69, 0.5), (71, 0.5), (72, 0.5),
+    # Bar 2
+    (74, 1), (67, 1), (67, 1),
+    # Bar 3
+    (76, 1), (72, 0.5), (74, 0.5), (76, 0.5), (78, 0.5),
+    # Bar 4
+    (79, 1), (67, 1), (67, 1),
+    # Bar 5
+    (72, 1), (74, 0.5), (72, 0.5), (71, 0.5), (69, 0.5),
+    # Bar 6
+    (71, 1), (72, 0.5), (71, 0.5), (69, 0.5), (67, 0.5),
+    # Bar 7, including the written grace note before bar 8
+    (66, 1), (67, 0.5), (69, 0.5), (71, 0.5),
+    (67, 37 / 96), (71, 11 / 96),
+    # Bar 8
+    (69, 3),
+    # Bar 9
+    (74, 1), (67, 0.5), (69, 0.5), (71, 0.5), (72, 0.5),
+    # Bar 10
+    (74, 1), (67, 1), (67, 1),
+    # Bar 11
+    (76, 1), (72, 0.5), (74, 0.5), (76, 0.5), (78, 0.5),
+    # Bar 12
+    (79, 1), (67, 1), (67, 1),
+    # Bar 13
+    (72, 1), (74, 0.5), (72, 0.5), (71, 0.5), (69, 0.5),
+    # Bar 14
+    (71, 1), (72, 0.5), (71, 0.5), (69, 0.5), (67, 0.5),
+    # Bar 15
+    (69, 1), (71, 0.5), (69, 0.5), (67, 0.5), (66, 0.5),
+    # Bar 16
+    (67, 3),
+]
+
+_MINUET_MELODY_B = [
+    # Bar 17
+    (83, 1), (79, 0.5), (81, 0.5), (83, 0.5), (79, 0.5),
+    # Bar 18
+    (81, 1), (74, 0.5), (76, 0.5), (78, 0.5), (74, 0.5),
+    # Bar 19
+    (79, 1), (76, 0.5), (78, 0.5), (79, 0.5), (74, 0.5),
+    # Bar 20
+    (73, 1), (71, 0.5), (73, 0.5), (69, 1),
+    # Bar 21
+    (69, 0.5), (71, 0.5), (73, 0.5), (74, 0.5), (76, 0.5), (78, 0.5),
+    # Bar 22
+    (79, 1), (78, 1), (76, 1),
+    # Bar 23
+    (78, 1), (69, 1), (73, 1),
+    # Bar 24
+    (74, 3),
+    # Bar 25
+    (74, 1), (67, 0.5), (66, 0.5), (67, 1),
+    # Bar 26
+    (76, 1), (67, 0.5), (66, 0.5), (67, 1),
+    # Bar 27
+    (74, 1), (72, 1), (71, 1),
+    # Bar 28
+    (69, 0.5), (67, 0.5), (66, 0.5), (67, 0.5), (69, 1),
+    # Bar 29
+    (62, 0.5), (64, 0.5), (66, 0.5), (67, 0.5), (69, 0.5), (71, 0.5),
+    # Bar 30
+    (72, 1), (71, 1), (69, 1),
+    # Bar 31
+    (71, 0.5), (74, 0.5), (67, 1), (66, 1),
+    # Bar 32
+    (67, 3),
+]
+
+_MINUET_BASS_A = [
+    # Bar 1; B3 and D4 are added as harmony below
+    (55, 2), (57, 1),
+    # Bar 2
+    (59, 3),
+    # Bar 3
+    (60, 3),
+    # Bar 4
+    (59, 3),
+    # Bar 5
+    (57, 3),
+    # Bar 6
+    (55, 3),
+    # Bar 7
+    (62, 1), (59, 1), (55, 1),
+    # Bar 8
+    (62, 1), (50, 0.5), (60, 0.5), (59, 0.5), (57, 0.5),
+    # Bar 9
+    (59, 2), (57, 1),
+    # Bar 10
+    (55, 1), (59, 1), (55, 1),
+    # Bar 11
+    (60, 3),
+    # Bar 12
+    (59, 1), (60, 0.5), (59, 0.5), (57, 0.5), (55, 0.5),
+    # Bar 13
+    (57, 2), (54, 1),
+    # Bar 14
+    (55, 2), (59, 1),
+    # Bar 15
+    (60, 1), (62, 1), (50, 1),
+    # Bar 16
+    (55, 2), (43, 1),
+]
+
+_MINUET_BASS_B = [
+    # Bar 17
+    (55, 3),
+    # Bar 18
+    (54, 3),
+    # Bar 19
+    (52, 1), (55, 1), (52, 1),
+    # Bar 20
+    (57, 2), (45, 1),
+    # Bar 21
+    (57, 3),
+    # Bar 22
+    (59, 1), (62, 1), (61, 1),
+    # Bar 23
+    (62, 1), (54, 1), (57, 1),
+    # Bar 24
+    (62, 1), (50, 1), (60, 1),
+    # Bar 25
+    (59, 2), (59, 1),
+    # Bar 26
+    (60, 2), (60, 1),
+    # Bar 27
+    (59, 1), (57, 1), (55, 1),
+    # Bar 28
+    (62, 2), (0, 1),
+    # Bar 29
+    (50, 3),
+    # Bar 30
+    (52, 1), (55, 1), (54, 1),
+    # Bar 31
+    (55, 1), (47, 1), (50, 1),
+    # Bar 32
+    (55, 1), (50, 1), (43, 1),
+]
+
+_MINUET_ACCENTS_A = ((0, 62), (12, 69), (24, 62), (36, 69), (45, 62))
+_MINUET_ACCENTS_B = ((0, 79), (12, 81), (24, 71), (36, 74), (45, 62))
+
+_minuet_melody = seq(_MINUET_MELODY_A * 2 + _MINUET_MELODY_B * 2,
+                     bpm=_MINUET_BPM)
+_minuet_bass = seq(_MINUET_BASS_A * 2 + _MINUET_BASS_B * 2,
+                   bpm=_MINUET_BPM)
+_minuet_spb = 60.0 / _MINUET_BPM
+_minuet_harmony = []
+for _start in (0.0, 48.0):
+    for _midi in (59, 62):
+        _minuet_harmony.append(Note(_start * _minuet_spb, _midi,
+                                    2 * _minuet_spb * 0.9))
+for _start in (96.0, 144.0):
+    for _offset, _midi, _beats in ((25, 62, 2), (28, 64, 2), (38, 54, 1),
+                                   (45, 59, 3), (45, 62, 3)):
+        _minuet_harmony.append(Note((_start + _offset) * _minuet_spb, _midi,
+                                    _beats * _minuet_spb * 0.9))
+_minuet_notes = sorted(_minuet_melody + _minuet_bass + _minuet_harmony,
+                       key=lambda n: n.time)
+# Chart-only harmony accents leave the original two-staff audio unchanged.
+_minuet_chart = list(_minuet_melody)
+_minuet_lead_times = {round(n.time / _minuet_spb, 9): n.time
+                      for n in _minuet_melody}
+for _start, _accents in ((0.0, _MINUET_ACCENTS_A), (48.0, _MINUET_ACCENTS_A),
+                         (96.0, _MINUET_ACCENTS_B), (144.0, _MINUET_ACCENTS_B)):
+    for _offset, _midi in _accents:
+        _time = _minuet_lead_times[round(_start + _offset, 9)]
+        _minuet_chart.append(Note(_time, _midi, _minuet_spb * 0.9))
+_minuet_chart.sort(key=lambda n: n.time)
+register(Song("minuet_g", "G 大调小步舞曲", "Minuet in G", _MINUET_BPM,
+              _minuet_notes, chart_notes=_minuet_chart))
 
 # 摇篮曲 / Brahms' Lullaby (Wiegenlied Op.49 No.4, public domain).
 # Melody verified note-by-note against the tuneonmusic beginner MIDI (C-major

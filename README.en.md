@@ -111,8 +111,9 @@ Twinkle Twinkle). Songs loop.
 
 ## Built-in songs
 
-Eight public-domain melodies. Prenatal mode includes the full library; the rhythm
-game contains only the complete Canon, with falling notes derived from violin I:
+Nine public-domain melodies. Prenatal mode includes the full library; the rhythm
+game contains the complete Canon (with falling notes derived from violin I) and
+Minuet in G (AABB repeats, right-hand lead with accented double notes):
 
 | Song | Chinese |
 | --- | --- |
@@ -122,6 +123,7 @@ game contains only the complete Canon, with falling notes derived from violin I:
 | Jingle Bells | 铃儿响叮当 |
 | Happy Birthday | 祝你生日快乐 |
 | Canon in C | 卡农 |
+| Minuet in G | G 大调小步舞曲 |
 | Brahms' Lullaby | 摇篮曲 |
 | London Bridge | 伦敦桥 |
 
@@ -129,6 +131,10 @@ Canon uses the complete three-violin-and-bass score from
 [Mutopia-2015/09/02-2047](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=2047),
 typeset by Michael Fischer v. Mollard and licensed under
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), transposed from D to C.
+
+Minuet in G, BWV Anh. 114 (Christian Petzold), uses the public-domain two-staff
+score from [Mutopia-2017/01/19-75](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=75),
+including both repeated sections and the written grace note.
 
 ## Architecture
 

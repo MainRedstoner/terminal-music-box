@@ -77,6 +77,29 @@ class Library(unittest.TestCase):
         self.assertEqual(song.title_en, "Canon in C")
         self.assertEqual(song.title_zh, "卡农")
 
+    def test_minuet_is_the_complete_aabb_score(self):
+        song = songs.SONGS["minuet_g"]
+        spb = 60.0 / song.bpm
+        self.assertEqual(song.bpm, 140)
+        self.assertEqual(len(song.notes), 408)
+        self.assertEqual(len(song.chart_notes), 274)
+        self.assertAlmostEqual(song.duration, 191.9 * spb)
+        self.assertEqual([n.midi for n in song.chart_notes[:17]],
+                         [74, 62, 67, 69, 71, 72, 74, 67, 67,
+                          76, 72, 74, 76, 78, 79, 67, 67])
+        for beat, pitch in ((0, 74), (48, 74), (96, 83), (144, 83)):
+            section = [n for n in song.chart_notes
+                       if abs(n.time - beat * spb) < 1e-9]
+            self.assertEqual(section[0].midi, pitch)
+        grace_time = (20.5 + 37 / 96) * spb
+        grace = next(n for n in song.chart_notes
+                     if abs(n.time - grace_time) < 1e-9)
+        self.assertEqual(grace.midi, 71)
+        final = [n.midi for n in song.notes if abs(n.time - 189 * spb) < 1e-9]
+        self.assertEqual(sorted(final), [55, 59, 62, 67])
+        self.assertEqual(song.title_en, "Minuet in G")
+        self.assertEqual(song.title_zh, "G 大调小步舞曲")
+
     def test_seq_skips_rests_but_keeps_time(self):
         notes = songs.seq([(60, 1), (0, 1), (-1, 1), (64, 2)], bpm=120)
         self.assertEqual([n.midi for n in notes], [60, 64])
@@ -114,6 +137,40 @@ class Beatmaps(unittest.TestCase):
         self.assertEqual(len(bm.notes), 638)
         self.assertLess(len(bm.notes), len(song.notes))
         self.assertAlmostEqual(bm.notes[0].time, 8 * 60.0 / song.bpm + bm.lead_in)
+
+    def test_minuet_beatmap_follows_the_right_hand_not_the_full_score(self):
+        song = songs.SONGS["minuet_g"]
+        bm = songs.get_beatmap("minuet_g")
+        self.assertEqual(len(bm.notes), 274)
+        self.assertLess(len(bm.notes), len(song.notes))
+        self.assertAlmostEqual(bm.notes[0].time, bm.lead_in)
+        self.assertAlmostEqual(bm.notes[-1].time,
+                               189 * 60.0 / song.bpm + bm.lead_in)
+
+    def test_minuet_has_twenty_double_taps_on_accents(self):
+        song = songs.SONGS["minuet_g"]
+        bm = songs.get_beatmap("minuet_g")
+        spb = 60.0 / song.bpm
+        accents = (
+            (0, 74, 62), (12, 72, 69), (24, 74, 62), (36, 72, 69), (45, 67, 62),
+            (48, 74, 62), (60, 72, 69), (72, 74, 62), (84, 72, 69), (93, 67, 62),
+            (96, 83, 79), (108, 69, 81), (120, 74, 71), (132, 62, 74), (141, 67, 62),
+            (144, 83, 79), (156, 69, 81), (168, 74, 71), (180, 62, 74), (189, 67, 62),
+        )
+        for beat, lead, harmony in accents:
+            with self.subTest(beat=beat):
+                chart_at = [n for n in song.chart_notes
+                            if abs(n.time - beat * spb) < 1e-9]
+                self.assertEqual([n.midi for n in chart_at], [lead, harmony])
+                bm_at = [n for n in bm.notes
+                         if abs(n.time - beat * spb - bm.lead_in) < 1e-9]
+                self.assertEqual(len(bm_at), 2)
+                self.assertEqual(len({n.lane for n in bm_at}), 2)
+        simultaneous = {}
+        for note in song.chart_notes:
+            simultaneous.setdefault(round(note.time, 7), []).append(note)
+        self.assertEqual(sum(len(notes) > 1 for notes in simultaneous.values()), 20)
+        self.assertTrue(all(len(notes) <= 2 for notes in simultaneous.values()))
 
     def test_beatmaps_are_pure_tap_notes(self):
         for sid in songs.ORDER:
