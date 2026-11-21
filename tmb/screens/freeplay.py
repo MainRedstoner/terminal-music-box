@@ -261,11 +261,12 @@ class FreePlayScreen(Screen):
                 break
             center_text(scr, y, text, fg, None, bold)
             y += 1
-        reserve = 2 if (self.player is not None and ctrl_y - y >= 12) else 0
+        # The stacked sound strip takes two rows; prenatal progress one more.
+        reserve = 2 if (self.player is not None and ctrl_y - y >= 12) else 1
         end = self._draw_keyboard(scr, y, ctrl_y - reserve - 1)
-        if self.player is not None and ctrl_y - 2 >= max(y, end):
-            self._draw_progress(scr, ctrl_y - 2)
-        self._draw_sound_strip(scr, ctrl_y - 1)
+        if self.player is not None and ctrl_y - 3 >= max(y, end):
+            self._draw_progress(scr, ctrl_y - 3)
+        self._draw_sound_strip(scr, ctrl_y - 2)
         self._draw_controls(scr, ctrl_y, btn_h)
         center_text(scr, h - 2, th.t("freeplay.exit_hint"), C.dim)
 
@@ -378,7 +379,7 @@ class FreePlayScreen(Screen):
             x += bw + gap
 
     def _draw_sound_strip(self, scr: Buffer, y: int) -> None:
-        """Inline per-timbre volume / length editors for the current timbre."""
+        """Stacked per-timbre volume / length editors for the current timbre."""
         th = self.theme
         w, h = scr.w, scr.h
         if not (0 <= y < h) or w < 30:
@@ -399,19 +400,16 @@ class FreePlayScreen(Screen):
              "%.2f×" % ln),
         ]
         seg_w = 24
-        gap = 4
-        total = len(segs) * seg_w + (len(segs) - 1) * gap
-        x = max(0, (w - total) // 2)
+        x = max(0, (w - seg_w) // 2)
         for i, (label, bar_text, val) in enumerate(segs):
+            row = y + i
+            if row >= h:
+                break
             sel = self.focus == i
-            fg = C.black if sel else C.gray
-            bg = C.cyan if sel else None
+            fg = C.cyan if sel else C.gray
             line = "%s %s %s" % (label, bar_text, val)
-            if sel:
-                scr.fill(x, y, seg_w, 1, " ", fg, bg)
-            scr.text(x, y, line, fg, bg, sel)
-            self.hits.add(x, y, seg_w, 1, (lambda idx=i: setattr(self, "focus", idx)))
-            x += seg_w + gap
+            scr.text(x, row, line, fg, None, sel)
+            self.hits.add(x, row, seg_w, 1, (lambda idx=i: setattr(self, "focus", idx)))
 
     def _draw_progress(self, scr: Buffer, y: int) -> None:
         p = self.player

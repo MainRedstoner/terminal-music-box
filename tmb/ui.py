@@ -57,13 +57,9 @@ def draw_box(screen: Screen, x: int, y: int, w: int, h: int, theme: Theme,
 def draw_button(screen: Screen, x: int, y: int, w: int, h: int, label: str,
                 theme: Theme, selected=False, fg=None, bg=None, hits: Optional[HitMap] = None,
                 action: Any = None) -> None:
-    if selected:
-        fg = fg if fg is not None else C.black
-        bg = bg if bg is not None else C.cyan
-    else:
-        fg = fg if fg is not None else C.white
-        bg = bg
-    draw_box(screen, x, y, w, h, theme, fg=fg if not selected else C.cyan, bg=bg)
+    fg = fg if fg is not None else C.white
+    # Selection recolors the border only; the interior keeps no highlight fill.
+    draw_box(screen, x, y, w, h, theme, fg=C.cyan if selected else fg, bg=bg)
     # fill interior
     screen.fill(x + 1, y + 1, w - 2, h - 2, " ", fg, bg)
     tw = text_width(label)

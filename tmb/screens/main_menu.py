@@ -48,9 +48,12 @@ class MainMenu(Screen):
         th = self.theme
         w, h = scr.w, scr.h
         center_text(scr, 2, th.t("app.title"), C.yellow, None, True)
-        center_text(scr, 3, "♪ ♫ ♪", C.cyan)
         mode = th.t("mode.unicode") if th.is_unicode else th.t("mode.ascii")
-        center_text(scr, 4, mode, C.dim)
+        if th.is_unicode:
+            center_text(scr, 3, "♪ ♫ ♪", C.cyan)
+            center_text(scr, 4, mode, C.dim)
+        else:  # ASCII terminals cannot render the note glyphs
+            center_text(scr, 3, mode, C.dim)
         items = self._items()
         bw = min(40, w - 6)
         bh = 3 if h >= 14 else 1
