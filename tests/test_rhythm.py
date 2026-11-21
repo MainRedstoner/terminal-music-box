@@ -18,7 +18,8 @@ class RhythmMenu(HeadlessCase):
     def test_shows_a_large_song_box_and_a_small_function_box(self):
         th = self.app.theme
         self.assertEqual(self.screen.focus, 0)
-        self.assertEqual(self.screen.song_ids, ["canon", "minuet_g"])
+        self.assertEqual(self.screen.song_ids,
+                         ["canon", "minuet_g", "turkish_march"])
         self.assertIn(th.t("rhythm.list"), self.frame)
         self.assertIn(th.t("rhythm.functions"), self.frame)
         self.assertIn(songs.SONGS["canon"].title("zh"), self.frame)
@@ -42,6 +43,19 @@ class RhythmMenu(HeadlessCase):
         self.click_label(songs.SONGS["minuet_g"].title("zh"))
         self.assertEqual(self.app.current_name, "rhythm_game")
         self.assertEqual(self.screen.song_id, "minuet_g")
+
+    def test_down_selects_and_starts_the_turkish_march(self):
+        self.press("down")
+        self.press("down")
+        self.assertEqual(self.screen.song_index, 2)
+        self.press("enter")
+        self.assertEqual(self.app.current_name, "rhythm_game")
+        self.assertEqual(self.screen.song_id, "turkish_march")
+
+    def test_mouse_click_on_the_turkish_march_starts_it(self):
+        self.click_label(songs.SONGS["turkish_march"].title("zh"))
+        self.assertEqual(self.app.current_name, "rhythm_game")
+        self.assertEqual(self.screen.song_id, "turkish_march")
 
     def test_left_right_and_tab_switch_focus(self):
         self.assertEqual(self.screen.focus, 0)

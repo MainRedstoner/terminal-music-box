@@ -151,7 +151,7 @@ class SongPlayer:
 # Library --------------------------------------------------------------------
 SONGS: Dict[str, Song] = {}
 ORDER: List[str] = []
-RHYTHM_ORDER: List[str] = ["canon", "minuet_g"]
+RHYTHM_ORDER: List[str] = ["canon", "minuet_g", "turkish_march"]
 
 
 def register(song: Song) -> Song:
@@ -713,6 +713,74 @@ for _start, _accents in ((0.0, _MINUET_ACCENTS_A), (48.0, _MINUET_ACCENTS_A),
 _minuet_chart.sort(key=lambda n: n.time)
 register(Song("minuet_g", "G 大调小步舞曲", "Minuet in G", _MINUET_BPM,
               _minuet_notes, chart_notes=_minuet_chart))
+
+# 土耳其进行曲 / Turkish March — the rondo from Mozart's Piano Sonata No. 11
+# in A major, K. 331 (third movement, "Rondo alla Turca"), public domain.
+# Melody follows the Mutopia edition (Mutopia-2015/08/13-108, typeset by Rune
+# Zedeler and Chris Sawer, public domain), condensed to the rondo form
+# A (A minor) - B (C major) - A - C (A major) - A (second ending):
+# https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=108
+# The A section keeps Mozart's written rhythm: an eighth note followed by a
+# rest, then the answering sixteenths. The C section is in A major and climbs
+# to C#6, so the chart uses every lane. The written turns and the closing trill
+# are simplified to even notes so every chart note is playable.
+_TURKISH_BPM = 120.0
+
+_TURKISH_A = [
+    # Pickup plus the 8-bar A-minor refrain (2/4).
+    (71, 0.25), (69, 0.25), (68, 0.25), (69, 0.25),
+    (72, 0.5), (0, 0.5), (74, 0.25), (72, 0.25), (71, 0.25), (72, 0.25),
+    (76, 0.5), (0, 0.5), (77, 0.25), (76, 0.25), (75, 0.25), (76, 0.25),
+    (83, 0.25), (81, 0.25), (80, 0.25), (81, 0.25),
+    (83, 0.25), (81, 0.25), (80, 0.25), (81, 0.25),
+    (84, 1.0), (81, 0.5), (84, 0.5),
+    (83, 0.5), (81, 0.5), (79, 0.5), (81, 0.5),
+    (83, 0.5), (81, 0.5), (79, 0.5), (81, 0.5),
+    (83, 0.5), (81, 0.5), (79, 0.5), (78, 0.5),
+    (76, 2.0),
+]
+
+_TURKISH_B = [
+    # B section in C major.
+    (76, 0.5), (77, 0.5),
+    (79, 0.5), (79, 0.5), (81, 0.25), (79, 0.25), (77, 0.25), (76, 0.25),
+    (74, 1.0), (76, 0.5), (77, 0.5),
+    (79, 0.5), (79, 0.5), (81, 0.25), (79, 0.25), (77, 0.25), (76, 0.25),
+    (74, 1.0), (72, 0.5), (74, 0.5),
+    (76, 0.5), (76, 0.5), (77, 0.25), (76, 0.25), (74, 0.25), (72, 0.25),
+    (71, 1.0), (72, 0.5), (74, 0.5),
+    (76, 0.5), (76, 0.5), (77, 0.25), (76, 0.25), (74, 0.25), (72, 0.25),
+    (71, 1.0),
+]
+
+_TURKISH_C = [
+    # C section in A major.
+    (81, 0.5), (83, 0.5),
+    (85, 1.0), (81, 0.5), (83, 0.5), (85, 0.5), (83, 0.5), (81, 0.5), (80, 0.5),
+    (78, 0.5), (80, 0.5), (81, 0.5), (83, 0.5), (80, 1.0), (76, 1.0),
+    (85, 1.0), (81, 0.5), (83, 0.5), (85, 0.5), (83, 0.5), (81, 0.5), (80, 0.5),
+    (78, 0.5), (83, 0.5), (80, 0.5), (76, 0.5), (81, 2.0),
+]
+
+_TURKISH_END = [
+    # The refrain's second ending: the cadence after the C section.
+    (71, 0.25), (69, 0.25), (68, 0.25), (69, 0.25),
+    (72, 0.5), (0, 0.5), (74, 0.25), (72, 0.25), (71, 0.25), (72, 0.25),
+    (76, 0.5), (0, 0.5), (77, 0.25), (76, 0.25), (75, 0.25), (76, 0.25),
+    (83, 0.25), (81, 0.25), (80, 0.25), (81, 0.25),
+    (83, 0.25), (81, 0.25), (80, 0.25), (81, 0.25),
+    (84, 0.5), (0, 0.5), (81, 0.5), (83, 0.5),
+    (84, 0.5), (83, 0.5), (81, 0.5), (80, 0.5),
+    (81, 0.5), (76, 0.5), (77, 0.5), (74, 0.5),
+    (72, 1.0), (71, 1.0), (69, 2.0),
+]
+
+_turkish_notes = seq(
+    _TURKISH_A + _TURKISH_B + _TURKISH_A + _TURKISH_C + _TURKISH_END,
+    bpm=_TURKISH_BPM,
+)
+register(Song("turkish_march", "土耳其进行曲", "Turkish March", _TURKISH_BPM,
+              _turkish_notes))
 
 # 摇篮曲 / Brahms' Lullaby (Wiegenlied Op.49 No.4, public domain).
 # Melody verified note-by-note against the tuneonmusic beginner MIDI (C-major

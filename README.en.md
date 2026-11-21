@@ -95,6 +95,8 @@ Twinkle Twinkle). Songs loop.
   crosses the judgment line. Your taps are silent judgment only.
 - Canon's timbre is locked to the didgeridoo, regardless of the free-play
   timbre selection.
+- Turkish March's chart follows the right-hand theme through the rondo form
+  A minor - C major - A minor - A major - A minor.
 - Default keys: `A S D J K L` (6 lanes), rebindable in **Key Config**
   (binding a key already in use swaps the two lanes).
 - Canon's chart is authored: dense phrases use the middle four lanes
@@ -111,9 +113,10 @@ Twinkle Twinkle). Songs loop.
 
 ## Built-in songs
 
-Nine public-domain melodies. Prenatal mode includes the full library; the rhythm
-game contains the complete Canon (with falling notes derived from violin I) and
-Minuet in G (AABB repeats, right-hand lead with accented double notes):
+Ten public-domain melodies. Prenatal mode includes the full library; the rhythm
+game contains the complete Canon (with falling notes derived from violin I),
+Minuet in G (AABB repeats, right-hand lead with accented double notes), and
+Turkish March (right-hand theme, A-B-A-C-A rondo):
 
 | Song | Chinese |
 | --- | --- |
@@ -124,6 +127,7 @@ Minuet in G (AABB repeats, right-hand lead with accented double notes):
 | Happy Birthday | 祝你生日快乐 |
 | Canon in C | 卡农 |
 | Minuet in G | G 大调小步舞曲 |
+| Turkish March | 土耳其进行曲 |
 | Brahms' Lullaby | 摇篮曲 |
 | London Bridge | 伦敦桥 |
 
@@ -135,6 +139,11 @@ typeset by Michael Fischer v. Mollard and licensed under
 Minuet in G, BWV Anh. 114 (Christian Petzold), uses the public-domain two-staff
 score from [Mutopia-2017/01/19-75](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=75),
 including both repeated sections and the written grace note.
+
+Turkish March is condensed from
+[Mutopia-2015/08/13-108](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=108),
+typeset by Rune Zedeler and Chris Sawer (public domain); the chart follows the
+right-hand theme through the A-B-A-C-A rondo form with repeats removed.
 
 ## Architecture
 

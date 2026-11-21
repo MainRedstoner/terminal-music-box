@@ -52,6 +52,22 @@ class Library(unittest.TestCase):
         self.assertGreater(songs.SONGS["ode_joy"].duration, 30)
         self.assertGreater(songs.SONGS["jingle_bells"].duration, 45)
 
+    def test_turkish_march_is_in_the_rhythm_library(self):
+        song = songs.SONGS["turkish_march"]
+        self.assertIn("turkish_march", songs.RHYTHM_ORDER)
+        self.assertEqual(song.title_zh, "土耳其进行曲")
+        self.assertEqual(song.title_en, "Turkish March")
+        self.assertEqual(song.bpm, 120)
+        self.assertGreater(song.duration, 40)
+        self.assertIsNone(song.timbre)
+
+    def test_turkish_march_opens_with_the_turn_and_climbs_to_c_sharp_six(self):
+        song = songs.SONGS["turkish_march"]
+        self.assertEqual([n.midi for n in song.notes[:4]], [71, 69, 68, 69])
+        self.assertEqual(max(n.midi for n in song.notes), 85)  # C#6, A-major episode
+        self.assertEqual([n.midi for n in song.notes[-5:]],
+                         [77, 74, 72, 71, 69])
+
     def test_only_canon_locks_a_timbre(self):
         # The rhythm game always plays canon on the didgeridoo; other songs
         # follow the user's timbre.
@@ -171,6 +187,11 @@ class Beatmaps(unittest.TestCase):
             simultaneous.setdefault(round(note.time, 7), []).append(note)
         self.assertEqual(sum(len(notes) > 1 for notes in simultaneous.values()), 20)
         self.assertTrue(all(len(notes) <= 2 for notes in simultaneous.values()))
+
+    def test_turkish_march_beatmap_uses_every_lane(self):
+        bm = songs.get_beatmap("turkish_march")
+        self.assertEqual(len(bm.notes), len(songs.SONGS["turkish_march"].notes))
+        self.assertEqual({n.lane for n in bm.notes}, set(range(6)))
 
     def test_beatmaps_are_pure_tap_notes(self):
         for sid in songs.ORDER:

@@ -383,6 +383,24 @@ class Minuet(Game):
             self.assertEqual(pn.call_count, 4)
 
 
+class TurkishMarch(Game):
+    song = "turkish_march"
+
+    def test_the_chart_is_the_right_hand_melody(self):
+        g = self.game
+        self.assertEqual(g.beatmap.song_id, "turkish_march")
+        self.assertEqual(len(g.notes), len(g.song.notes))
+        self.assertEqual(g.notes[0].time, g.song.notes[0].time + g.beatmap.lead_in)
+
+    def test_the_first_note_can_be_hit(self):
+        self.start_play()
+        n = self.game.notes[0]
+        self.at(n.time)
+        self.press(self.lane_key(n))
+        self.assertEqual(self.game.perfect, 1)
+        self.assertEqual(self.game.miss, 0)
+
+
 class TimbreLock(Game):
     song = "canon"
 
