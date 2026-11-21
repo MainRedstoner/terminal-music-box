@@ -97,7 +97,9 @@ Twinkle Twinkle). Songs loop.
   electric piano, regardless of the free-play timbre selection.
 - Turkish March is the complete rondo
   (A-B-A'-C-D-E-C-A-B-A'-transition-coda); its chart follows the right-hand
-  theme, and dense passages stay on the four inner lanes.
+  theme. Dense passages stay on the four inner lanes and alternate between
+  them, and every other bar's accented downbeat plus the final note adds a
+  two-key chord.
 - Default keys: `A S D J K L` (6 lanes), rebindable in **Key Config**
   (binding a key already in use swaps the two lanes).
 - Canon's chart is authored: dense phrases use the middle four lanes

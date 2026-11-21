@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from bisect import bisect_right
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -95,32 +95,86 @@ def beatmap_from_song(song: Song, lead_in: float = 2.0) -> Beatmap:
     return Beatmap(song.id, notes, lead_in=lead_in)
 
 
-def _turkish_beatmap(song: Song, lead_in: float = 2.0) -> Beatmap:
-    """Chart the Turkish March, keeping dense streams off the outer lanes.
+def _turkish_lane_plan(melody: List[Note], bpm: float
+                       ) -> Tuple[List[int], List[Tuple[int, int]]]:
+    """Return (main lanes, accent companions) for the Turkish March chart.
 
-    Notes that touch a 16th-note neighbour use the four inner lanes; slower
-    notes may still reach lanes 0 and 5.
+    Dense 16th-note streams stay on the four inner lanes, and a repeated pitch
+    alternates to a neighbouring lane instead of piling up on one key. Every
+    other bar's long downbeat (and the final note) adds a companion lane for a
+    two-key accent chord.
     """
+    n = len(melody)
+    times = [note.time for note in melody]
+    lo = min(note.midi for note in melody)
+    hi = max(note.midi for note in melody)
+    span = max(1, hi - lo)
+    dense_gap = 0.25 * 60.0 / bpm
+
+    dense: List[bool] = []
+    for i in range(n):
+        prev_gap = times[i] - times[i - 1] if i else float("inf")
+        next_gap = times[i + 1] - times[i] if i + 1 < n else float("inf")
+        dense.append(min(prev_gap, next_gap) <= dense_gap)
+
+    # Repeated pitches alternate lanes so runs never pile up on one key. The
+    # alternation applies up to one beat apart; longer gaps start fresh.
+    spread_gap = 60.0 / bpm
+    lanes: List[int] = [0] * n
+    last = -1
+    last_time = 0.0
+    for i, note in enumerate(melody):
+        if dense[i]:
+            lane = 1 + int((note.midi - lo) * 4 / (span + 1))
+            lane = max(1, min(4, lane))
+            low, high = 1, 4
+        else:
+            lane = int((note.midi - lo) * 6 / (span + 1))
+            lane = max(0, min(5, lane))
+            low, high = 0, 5
+        if lane == last and note.time - last_time <= spread_gap:
+            options = [alt for alt in (lane - 1, lane + 1)
+                       if low <= alt <= high]
+            options.sort(key=lambda alt: (alt in (0, 5), abs(alt - lane), alt))
+            if options:
+                lane = options[0]
+        lanes[i] = lane
+        last = lane
+        last_time = note.time
+
+    # Accent chords: the first beat of every other bar, when the melody holds
+    # for at least an eighth, plus the final note. Times are quantised to 32nds
+    # so the check does not drift with float accumulation.
+    q = bpm * 8.0 / 60.0
+    chords: List[Tuple[int, int]] = []
+    for i, note in enumerate(melody):
+        start = round(note.time * q)
+        dur = round(note.dur * q)
+        accent = i == n - 1 or ((start - 8) % 32 == 0 and dur >= 4)
+        if not accent:
+            continue
+        forbidden = {lanes[i]}
+        if i and times[i] - times[i - 1] <= dense_gap:
+            forbidden.add(lanes[i - 1])
+        if i + 1 < n and times[i + 1] - times[i] <= dense_gap:
+            forbidden.add(lanes[i + 1])
+        companions = [lane for lane in range(6) if lane not in forbidden]
+        companions.sort(key=lambda lane: (lane in (0, 5), abs(lane - lanes[i])))
+        if companions:
+            chords.append((i, companions[0]))
+    return lanes, chords
+
+
+def _turkish_beatmap(song: Song, lead_in: float = 2.0) -> Beatmap:
+    """Chart the Turkish March with spread-out runs and accent chords."""
     melody = song.chart_notes if song.chart_notes is not None else song.notes
     if not melody:
         return Beatmap(song.id, [], lead_in=lead_in)
-    lo = min(n.midi for n in melody)
-    hi = max(n.midi for n in melody)
-    span = max(1, hi - lo)
-    dense_gap = 0.25 * 60.0 / song.bpm
-    notes: List[RNote] = []
-    for i, n in enumerate(melody):
-        prev_gap = n.time - melody[i - 1].time if i else float("inf")
-        next_gap = (melody[i + 1].time - n.time
-                    if i + 1 < len(melody) else float("inf"))
-        if min(prev_gap, next_gap) <= dense_gap:
-            lane = 1 + int((n.midi - lo) * 4 / (span + 1))
-            lane = max(1, min(4, lane))
-        else:
-            lane = int((n.midi - lo) * 6 / (span + 1))
-            lane = max(0, min(5, lane))
-        notes.append(RNote(n.time + lead_in, lane))
-    notes.sort(key=lambda r: r.time)
+    lanes, chords = _turkish_lane_plan(melody, song.bpm)
+    notes = [RNote(note.time + lead_in, lanes[i])
+             for i, note in enumerate(melody)]
+    notes.extend(RNote(melody[i].time + lead_in, lane) for i, lane in chords)
+    notes.sort(key=lambda r: (r.time, r.lane))
     return Beatmap(song.id, notes, lead_in=lead_in)
 
 

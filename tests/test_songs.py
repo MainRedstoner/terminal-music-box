@@ -1,6 +1,7 @@
 """Song library, beatmap derivation and the pausable SongPlayer."""
 from __future__ import annotations
 
+import itertools
 import unittest
 from collections import Counter
 
@@ -145,12 +146,18 @@ class Beatmaps(unittest.TestCase):
             with self.subTest(song=sid):
                 melody = song.chart_notes if song.chart_notes is not None else song.notes
                 self.assertEqual(bm.song_id, sid)
-                self.assertEqual(len(bm.notes), len(melody))
+                self.assertGreaterEqual(len(bm.notes), len(melody))
+                if sid != "turkish_march":
+                    self.assertEqual(len(bm.notes), len(melody))
+                # Accent chords repeat a melody time; no chart note may drift.
+                self.assertEqual(
+                    sorted({round(n.time, 9) for n in bm.notes}),
+                    sorted({round(n.time + 2.0, 9) for n in melody}),
+                )
                 times = [n.time for n in bm.notes]
                 self.assertEqual(times, sorted(times))
-                for rn, sn in zip(bm.notes, sorted(melody, key=lambda n: n.time)):
+                for rn in bm.notes:
                     self.assertIn(rn.lane, range(6))
-                    self.assertAlmostEqual(rn.time, sn.time + 2.0)
                 self.assertAlmostEqual(bm.duration, max(n.time for n in bm.notes))
 
     def test_canon_beatmap_follows_violin_one_not_the_full_ensemble(self):
@@ -197,23 +204,69 @@ class Beatmaps(unittest.TestCase):
     def test_turkish_march_beatmap_uses_every_lane(self):
         song = songs.SONGS["turkish_march"]
         bm = songs.get_beatmap("turkish_march")
-        self.assertEqual(len(bm.notes), len(song.chart_notes))
+        self.assertGreater(len(bm.notes), len(song.chart_notes))
         self.assertEqual({n.lane for n in bm.notes}, set(range(6)))
+
+    def test_turkish_march_adds_accent_chords(self):
+        song = songs.SONGS["turkish_march"]
+        lanes, chords = songs._turkish_lane_plan(song.chart_notes, song.bpm)
+        self.assertGreaterEqual(len(chords), 20)
+        for i, companion in chords:
+            self.assertIn(companion, range(6))
+            self.assertNotEqual(companion, lanes[i])
 
     def test_turkish_march_dense_notes_stay_off_the_outer_lanes(self):
         song = songs.SONGS["turkish_march"]
         bm = songs.get_beatmap("turkish_march")
         times = [n.time for n in song.chart_notes]
         dense_gap = 0.25 * 60.0 / song.bpm
-        dense = 0
-        for i, rn in enumerate(bm.notes):
+        dense_times = set()
+        for i in range(len(times)):
             prev = times[i] - times[i - 1] if i else float("inf")
             nxt = (times[i + 1] - times[i]
                    if i + 1 < len(times) else float("inf"))
             if min(prev, nxt) <= dense_gap:
-                dense += 1
+                dense_times.add(round(times[i] + bm.lead_in, 6))
+        self.assertGreater(len(dense_times), 300)
+        for rn in bm.notes:
+            if round(rn.time, 6) in dense_times:
                 self.assertIn(rn.lane, (1, 2, 3, 4))
-        self.assertGreater(dense, 300)
+
+    def test_turkish_march_repeated_notes_change_lanes(self):
+        song = songs.SONGS["turkish_march"]
+        lanes, _chords = songs._turkish_lane_plan(song.chart_notes, song.bpm)
+        longest = max(len(list(g)) for _, g in itertools.groupby(lanes))
+        self.assertLessEqual(longest, 2)
+
+    def test_turkish_march_dense_runs_change_lanes(self):
+        song = songs.SONGS["turkish_march"]
+        lanes, _chords = songs._turkish_lane_plan(song.chart_notes, song.bpm)
+        notes = song.chart_notes
+        times = [n.time for n in notes]
+        dense_gap = 0.25 * 60.0 / song.bpm
+        dense = []
+        for i in range(len(notes)):
+            prev = times[i] - times[i - 1] if i else float("inf")
+            nxt = (times[i + 1] - times[i]
+                   if i + 1 < len(times) else float("inf"))
+            dense.append(min(prev, nxt) <= dense_gap)
+        runs = []
+        i = 0
+        while i < len(notes):
+            if not dense[i]:
+                i += 1
+                continue
+            j = i + 1
+            while j < len(notes) and dense[j]:
+                j += 1
+            runs.append(lanes[i:j])
+            i = j
+        long_runs = [run for run in runs if len(run) >= 4]
+        self.assertGreater(len(long_runs), 0)
+        for run in long_runs:
+            self.assertGreaterEqual(len(set(run)), 2)
+            longest = max(len(list(g)) for _, g in itertools.groupby(run))
+            self.assertLessEqual(longest, 2)
 
     def test_beatmaps_are_pure_tap_notes(self):
         for sid in songs.ORDER:
