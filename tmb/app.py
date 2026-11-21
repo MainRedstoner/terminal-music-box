@@ -22,6 +22,9 @@ class App:
         self.current = None
         self.current_name = ""
         self.running = True
+        # Tests bulk-advance the sim by thousands of steps without looking at
+        # the picture; drawing every frame dominates their runtime.
+        self.render_frames = True
         # perf_counter, not monotonic: on Windows monotonic() is GetTickCount64
         # with a 15.6 ms resolution, which quantises every frame delta.
         self._last = time.perf_counter()
@@ -92,6 +95,10 @@ class App:
             self._dispatch(e)
         if not self.running:
             return
+        if self.render_frames:
+            self._render_frame()
+
+    def _render_frame(self) -> None:
         scr = self.terminal.screen
         scr.clear()
         if self.current is not None:

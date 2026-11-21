@@ -8,6 +8,7 @@ which keeps SSH / serial output on a Raspberry Pi cheap.
 from __future__ import annotations
 
 import unicodedata
+from functools import lru_cache
 from typing import List, Optional, Tuple
 
 # 256-color palette indices (widely supported: Linux console, SSH, Windows Terminal)
@@ -37,6 +38,7 @@ CONT = ""  # continuation marker for the 2nd column of a wide char
 DEFAULT_CELL: Cell = (" ", None, None, False)
 
 
+@lru_cache(maxsize=4096)
 def char_width(ch: str) -> int:
     if not ch:
         return 0
@@ -162,5 +164,7 @@ class Screen:
         """
         lines = []
         for row in self.cells:
-            lines.append("".join(ch for ch, *_ in row if ch and ch != CONT).rstrip())
+            # List comp (not genexpr): join() over a list is measurably faster,
+            # and this runs once per rendered frame.
+            lines.append("".join([c[0] for c in row if c[0] and c[0] != CONT]).rstrip())
         return "\n".join(lines)

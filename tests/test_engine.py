@@ -4,6 +4,7 @@ from __future__ import annotations
 import array
 import os
 import tempfile
+import threading
 import time
 import unittest
 import wave
@@ -220,12 +221,25 @@ class Preload(unittest.TestCase):
         self.assertEqual(set(self.eng._cache), {("bit", 60), ("bit", 62)})
 
     def test_a_newer_preload_supersedes_the_running_one(self):
-        self.eng.preload("harp", (48, 50, 52, 53, 55, 57, 59))  # slow renders
-        self.eng.preload("bit", (60,))
-        self.assertTrue(self._wait_cache(("bit", 60)))
-        time.sleep(0.6)  # grace: at most one in-flight harp render may land
-        harp = sum(1 for tid, _ in self.eng._cache if tid == "harp")
-        self.assertLess(harp, 4)
+        # Hold the first request's render open until the newer request has
+        # been issued: supersede must stop it after the one in-flight note.
+        from unittest import mock
+        release = threading.Event()
+        harp = synth.get_timbre("harp")
+        original = harp.render
+
+        def held_render(midi):
+            release.wait(timeout=5.0)
+            return original(midi)
+
+        with mock.patch.object(harp, "render", held_render):
+            self.eng.preload("harp", (48, 50, 52, 53, 55, 57, 59))
+            self.eng.preload("bit", (60,))
+            self.assertTrue(self._wait_cache(("bit", 60)))
+            release.set()
+        time.sleep(0.2)  # grace: the one in-flight harp render may land
+        harp_cached = sum(1 for tid, _ in self.eng._cache if tid == "harp")
+        self.assertLess(harp_cached, 4)
 
     def test_pinned_request_survives_cache_pressure(self):
         """Regression: two scores bigger than the cache together.

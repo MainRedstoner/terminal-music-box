@@ -220,8 +220,12 @@ class RhythmGameScreen(Screen):
         self.song_time += dt
         self._sync_melody()
         ht = self.song_time - self.offset_sec
+        # Notes are time-sorted (get_beatmap); stop at the first note still
+        # inside its miss window instead of rescanning the whole chart.
         for i, n in enumerate(self.notes):
-            if self.note_state[i] == 0 and n.time + GOOD_WIN < ht:
+            if n.time + GOOD_WIN >= ht:
+                break
+            if self.note_state[i] == 0:
                 self._miss(n.lane, i)
         if self.song_time > self.beatmap.duration + RESULT_TAIL:
             self._finish()

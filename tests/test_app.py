@@ -229,16 +229,23 @@ class AllScreensAtManySizes(unittest.TestCase):
                     app.navigate(name, **kw)
                     for _ in range(3):
                         app.step(0.016)
-                    if name == "freeplay":
-                        term.key("ctrl+t")
-                        app.step(0.016)
-                        for _ in range(40):
-                            app.step(0.05)
-                    if name == "rhythm_game":
-                        for _ in range(70):
-                            app.step(0.05)
-                        term.key("esc")
-                        app.step(0.016)
+                    # The long advancement loops only move time; skip their
+                    # per-frame draws and render a single end-state frame.
+                    app.render_frames = False
+                    try:
+                        if name == "freeplay":
+                            term.key("ctrl+t")
+                            app.step(0.016)
+                            for _ in range(40):
+                                app.step(0.05)
+                        if name == "rhythm_game":
+                            for _ in range(70):
+                                app.step(0.05)
+                            term.key("esc")
+                            app.step(0.016)
+                    finally:
+                        app.render_frames = True
+                        app._render_frame()
                     self.assertEqual(len(term.last.split("\n")), h)
 
 

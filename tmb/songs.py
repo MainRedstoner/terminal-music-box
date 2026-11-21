@@ -11,6 +11,7 @@ import math
 from bisect import bisect_right
 from collections import Counter
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import Dict, List, Optional, Tuple
 
 
@@ -33,8 +34,10 @@ class Song:
     chart_lanes: Optional[List[int]] = None  # explicit lanes for chart_notes
     timbre: Optional[str] = None  # locked rhythm-game sound; None = user's timbre
 
-    @property
+    @cached_property
     def duration(self) -> float:
+        """Song end in seconds. The player reads this every frame: O(n) max()
+        over a few hundred notes, per frame, adds up — compute it once."""
         if not self.notes:
             return 0.0
         return max(n.time + n.dur for n in self.notes)
@@ -56,8 +59,9 @@ class Beatmap:
     difficulty: str = "Normal"
     lead_in: float = 2.0   # chart times = song times + lead_in
 
-    @property
+    @cached_property
     def duration(self) -> float:
+        """Chart end in seconds (read every frame by the rhythm screen)."""
         if not self.notes:
             return 0.0
         return max(n.time for n in self.notes)

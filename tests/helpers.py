@@ -6,13 +6,43 @@ import tempfile
 import unittest
 from unittest import mock
 
+# Rendering one (timbre, midi) note is ~0.1-0.6 s of pure-Python DSP, and every
+# test builds a fresh engine that would re-render the same buffers. Memoize at
+# the synth layer instead: engines treat NoteBuffers as read-only, so sharing
+# them across engines is safe (the engine's own cache/eviction is untouched).
+# Serial preload (TMB_NO_MP) also keeps those renders in-process, where the
+# memo applies; worker processes would each re-render from scratch.
+os.environ.setdefault("TMB_NO_MP", "1")
+
 from tmb.ansi import CONT
 from tmb.app import App
+from tmb.audio import synth
 from tmb.audio.backends import NullBackend
 from tmb.audio.engine import AudioEngine
 from tmb.config import Config
 from tmb.screens import register_all
 from tmb.testing import HeadlessTerminal
+
+
+_RENDER_MEMO: dict = {}
+
+
+def _memoize_timbre_renders() -> None:
+    for t in list(synth.TIMBRES.values()):
+        original = t.render
+
+        def render(midi, _t=t, _original=original, _memo=_RENDER_MEMO):
+            key = (_t.id, midi)
+            nb = _memo.get(key)
+            if nb is None:
+                nb = _original(midi)
+                _memo[key] = nb
+            return nb
+
+        t.render = render
+
+
+_memoize_timbre_renders()
 
 
 def isolated_config(case) -> str:
@@ -64,7 +94,20 @@ class HeadlessCase(unittest.TestCase):
             self.app.step(dt)
 
     def advance(self, seconds, dt=0.01):
-        self.steps(max(1, int(round(seconds / dt))), dt)
+        n = max(1, int(round(seconds / dt)))
+        rf = self.app.render_frames
+        self.app.render_frames = False
+        try:
+            for _ in range(n):
+                self.app.step(dt)
+        finally:
+            self.app.render_frames = rf
+            self._refresh_frame()
+
+    def _refresh_frame(self):
+        """Re-render once after a render-skipped bulk advance so self.frame is current."""
+        if self.app.running:
+            self.app._render_frame()
 
     def press(self, key, dt=0.016):
         self.term.key(key)
@@ -89,10 +132,16 @@ class HeadlessCase(unittest.TestCase):
         self.app.step(dt)
 
     def run_until(self, pred, dt=0.005, max_steps=200000):
-        for _ in range(max_steps):
-            if pred():
-                return
-            self.app.step(dt)
+        rf = self.app.render_frames
+        self.app.render_frames = False
+        try:
+            for _ in range(max_steps):
+                if pred():
+                    self._refresh_frame()
+                    return
+                self.app.step(dt)
+        finally:
+            self.app.render_frames = rf
         self.fail("run_until: condition never became true")
 
     def find_label(self, label):

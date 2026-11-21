@@ -154,14 +154,33 @@ def normalize(buf: array, peak: float = 0.9) -> array:
     return scale(buf, peak / m)
 
 
+_FADE_WINDOWS: Dict[int, array] = {}
+
+
+def _fade_window(nf: int) -> array:
+    """Raised-cosine fade curve for nf samples, cached per length.
+
+    assemble_oneshot / Voice.release fade every played note with the same
+    shape; the per-sample math.cos was the dominant render-side cost.
+    """
+    w = _FADE_WINDOWS.get(nf)
+    if w is None:
+        w = array("f", (0.5 + 0.5 * math.cos(math.pi * (i + 1) / nf)
+                        for i in range(nf)))
+        _FADE_WINDOWS[nf] = w
+    return w
+
+
 def fade_out(buf: array, ms: float) -> array:
     """Raised-cosine fade to exact silence (smooth slope at both ends)."""
     nf = min(len(buf), int(ms / 1000 * SR))
     if nf <= 0:
         return buf
     out = array("f", buf)
+    w = _fade_window(nf)
+    base = len(out) - nf
     for i in range(nf):
-        out[len(out) - nf + i] *= 0.5 + 0.5 * math.cos(math.pi * (i + 1) / nf)
+        out[base + i] *= w[i]
     return out
 
 
