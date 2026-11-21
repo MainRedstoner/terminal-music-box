@@ -74,14 +74,17 @@ class Library(unittest.TestCase):
                          [81, 88, 81, 81, 81])
 
     def test_rhythm_songs_lock_their_timbres(self):
-        # Canon sounds on the didgeridoo; Turkish March and Minuet in G on the
-        # electric piano. Every other song follows the user's timbre.
+        # Canon sounds on the didgeridoo; Turkish March, Minuet in G, and
+        # Für Elise on the electric piano. Every other song follows the
+        # user's timbre.
         self.assertEqual(songs.SONGS["canon"].timbre, "didgeridoo")
         self.assertEqual(songs.SONGS["turkish_march"].timbre, "pling")
         self.assertEqual(songs.SONGS["minuet_g"].timbre, "pling")
+        self.assertEqual(songs.SONGS["fur_elise"].timbre, "pling")
         self.assertEqual({sid for sid in songs.ORDER
                           if songs.SONGS[sid].timbre is not None},
-                         {"canon", "minuet_g", "turkish_march"})
+                         {"canon", "minuet_g", "turkish_march",
+                          "fur_elise"})
 
     def test_canon_is_the_complete_four_part_score(self):
         song = songs.SONGS["canon"]
@@ -123,6 +126,37 @@ class Library(unittest.TestCase):
         self.assertEqual(sorted(final), [55, 59, 62, 67])
         self.assertEqual(song.title_en, "Minuet in G")
         self.assertEqual(song.title_zh, "G 大调小步舞曲")
+
+    def test_fur_elise_is_the_complete_expanded_piano_score(self):
+        song = songs.SONGS["fur_elise"]
+        self.assertEqual(song.bpm, 60)
+        self.assertEqual(len(song.notes), 1041)  # 605 right-hand + 436 left-hand
+        self.assertEqual(len(song.chart_notes), 594)  # 551 onsets + 43 double taps
+        self.assertEqual(len(song.chart_lanes), len(song.chart_notes))
+        self.assertAlmostEqual(song.duration, 189.5)
+        self.assertEqual(min(n.midi for n in song.notes), 33)
+        self.assertEqual(max(n.midi for n in song.notes), 100)
+        self.assertEqual([n.midi for n in song.chart_notes[:9]],
+                         [76, 75, 76, 75, 76, 71, 74, 72, 69])
+        lead_pitches = {}
+        for note in song.chart_notes:
+            lead_pitches[note.time] = max(lead_pitches.get(note.time, 0),
+                                          note.midi)
+        self.assertEqual(min(lead_pitches.values()), 57)
+        self.assertEqual(max(lead_pitches.values()), 100)
+
+        def pitches_at(notes, beat):
+            return [n.midi for n in notes if abs(n.time - beat) < 1e-9]
+
+        # Both printed A and B repeats, the F/C episodes, and the final A.
+        for beat in (0, 12, 25.5, 46.5, 157.5):
+            self.assertEqual(pitches_at(song.chart_notes, beat), [76])
+        self.assertEqual(pitches_at(song.chart_notes, 69), [72])
+        self.assertEqual(sorted(pitches_at(song.notes, 124.5)),
+                         [45, 64, 67, 70, 73])
+        self.assertEqual(sorted(pitches_at(song.notes, 189)), [33, 45, 69])
+        self.assertEqual(song.title_en, "Für Elise")
+        self.assertEqual(song.title_zh, "致爱丽丝")
 
     def test_seq_skips_rests_but_keeps_time(self):
         notes = songs.seq([(60, 1), (0, 1), (-1, 1), (64, 2)], bpm=120)
@@ -268,6 +302,35 @@ class Beatmaps(unittest.TestCase):
             self.assertGreaterEqual(len(set(run)), 2)
             longest = max(len(list(g)) for _, g in itertools.groupby(run))
             self.assertLessEqual(longest, 2)
+
+    def test_fur_elise_beatmap_is_balanced_and_uses_double_taps(self):
+        song = songs.SONGS["fur_elise"]
+        bm = songs.get_beatmap("fur_elise")
+        self.assertEqual(len(bm.notes), 594)
+        self.assertLess(len(bm.notes), len(song.notes))
+        self.assertEqual({n.lane for n in bm.notes}, set(range(6)))
+        self.assertAlmostEqual(bm.notes[0].time, 2.0)
+        self.assertAlmostEqual(bm.notes[-1].time, 191.0)
+        self.assertAlmostEqual(song.chart_notes[-1].time, 189.0)
+        self.assertGreater(song.duration, song.chart_notes[-1].time)
+
+        by_time = {}
+        for note in bm.notes:
+            by_time.setdefault(note.time, set()).add(note.lane)
+        self.assertEqual(len(by_time), 551)
+        doubles = [lanes for lanes in by_time.values() if len(lanes) > 1]
+        self.assertEqual(len(doubles), 43)
+        for lanes in doubles:
+            self.assertEqual(len(lanes), 2)
+
+        loads = [sum(1 for n in bm.notes if n.lane == lane) for lane in range(6)]
+        self.assertGreaterEqual(min(loads), 80)
+        self.assertLessEqual(max(loads), 120)
+
+        # No lane may appear on three consecutive onsets.
+        timeline = [by_time[t] for t in sorted(by_time)]
+        for earlier, middle, later in zip(timeline, timeline[1:], timeline[2:]):
+            self.assertFalse(earlier & middle & later)
 
     def test_beatmaps_are_pure_tap_notes(self):
         for sid in songs.ORDER:

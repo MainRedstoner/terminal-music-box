@@ -19,11 +19,13 @@ class RhythmMenu(HeadlessCase):
         th = self.app.theme
         self.assertEqual(self.screen.focus, 0)
         self.assertEqual(self.screen.song_ids,
-                         ["canon", "minuet_g", "turkish_march"])
+                         ["canon", "minuet_g", "turkish_march", "fur_elise"])
         self.assertIn(th.t("rhythm.list"), self.frame)
         self.assertIn(th.t("rhythm.functions"), self.frame)
         self.assertIn(songs.SONGS["canon"].title("zh"), self.frame)
         self.assertIn(songs.SONGS["minuet_g"].title("zh"), self.frame)
+        self.assertIn(songs.SONGS["turkish_march"].title("zh"), self.frame)
+        self.assertIn(songs.SONGS["fur_elise"].title("zh"), self.frame)
         self.assertIn(th.t("rhythm.calibration"), self.frame)
         self.assertIn(th.t("rhythm.keys"), self.frame)
 
@@ -56,6 +58,19 @@ class RhythmMenu(HeadlessCase):
         self.click_label(songs.SONGS["turkish_march"].title("zh"))
         self.assertEqual(self.app.current_name, "rhythm_game")
         self.assertEqual(self.screen.song_id, "turkish_march")
+
+    def test_down_selects_and_starts_fur_elise(self):
+        for _ in range(3):
+            self.press("down")
+        self.assertEqual(self.screen.song_index, 3)
+        self.press("enter")
+        self.assertEqual(self.app.current_name, "rhythm_game")
+        self.assertEqual(self.screen.song_id, "fur_elise")
+
+    def test_mouse_click_on_fur_elise_starts_it(self):
+        self.click_label(songs.SONGS["fur_elise"].title("zh"))
+        self.assertEqual(self.app.current_name, "rhythm_game")
+        self.assertEqual(self.screen.song_id, "fur_elise")
 
     def test_left_right_and_tab_switch_focus(self):
         self.assertEqual(self.screen.focus, 0)

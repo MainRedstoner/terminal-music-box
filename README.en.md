@@ -93,8 +93,8 @@ Twinkle Twinkle). Songs loop.
 ### Rhythm Game
 - The melody auto-plays for the whole run — each note sounds exactly as it
   crosses the judgment line. Your taps are silent judgment only.
-- Canon's timbre is locked to the didgeridoo; Turkish March and Minuet in G
-  use the electric piano, regardless of the free-play timbre selection.
+- Canon's timbre is locked to the didgeridoo; Turkish March, Minuet in G, and
+  Für Elise use the electric piano, regardless of the free-play timbre selection.
 - Turkish March is the complete rondo
   (A-B-A'-C-D-E-C-A-B-A'-transition-coda); its chart follows the right-hand
   theme. Dense passages stay on the four inner lanes and alternate between
@@ -116,10 +116,11 @@ Twinkle Twinkle). Songs loop.
 
 ## Built-in songs
 
-Ten public-domain melodies. Prenatal mode includes the full library; the rhythm
+Eleven public-domain melodies. Prenatal mode includes the full library; the rhythm
 game contains the complete Canon (with falling notes derived from violin I),
-Minuet in G (AABB repeats, right-hand lead with accented double notes), and
-Turkish March (right-hand theme, A-B-A-C-A rondo):
+Minuet in G (AABB repeats, right-hand lead with accented double notes), Turkish
+March (right-hand theme, complete rondo), and Für Elise (top right-hand voice,
+evenly spread across the six lanes with light double taps on chords and downbeats):
 
 | Song | Chinese |
 | --- | --- |
@@ -131,6 +132,7 @@ Turkish March (right-hand theme, A-B-A-C-A rondo):
 | Canon in C | 卡农 |
 | Minuet in G | G 大调小步舞曲 |
 | Turkish March | 土耳其进行曲 |
+| Für Elise | 致爱丽丝 |
 | Brahms' Lullaby | 摇篮曲 |
 | London Bridge | 伦敦桥 |
 
@@ -148,6 +150,14 @@ Turkish March uses the complete written-through score from
 typeset by Rune Zedeler and Chris Sawer (public domain); repeats are not taken.
 Auto-play keeps both piano hands, while the chart follows the right-hand melody
 with ornaments shorter than a sixteenth removed.
+
+Für Elise uses the complete WoO 59 piano score from
+[Mutopia-2015/08/18-931](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=931)
+(Breitkopf & Härtel, 1888), with both printed repeats expanded. Typesetter Stelios
+Samelis dedicated this edition to the public domain. Its chart keeps the top
+right-hand voice as the primary tap; micro-timed grace notes remain only in the
+auto-played score. Chords and the first beat of every four bars add light double
+taps, lane loads stay balanced, and no lane repeats on three consecutive onsets.
 
 ## Architecture
 

@@ -427,6 +427,41 @@ class TurkishMarch(Game):
         self.assertEqual(self.game.miss, 0)
 
 
+class FurElise(Game):
+    song = "fur_elise"
+
+    def test_loads_the_full_song_with_the_locked_timbre(self):
+        g = self.game
+        self.assertEqual(g.song_id, "fur_elise")
+        self.assertIs(g.beatmap, songs.get_beatmap("fur_elise"))
+        self.assertEqual(len(g.notes), 594)
+        self.assertEqual((g.timbre, g.player.timbre), ("pling", "pling"))
+        self.assertIn("致爱丽丝", self.frame)
+
+    def test_first_note_sounds_exactly_at_the_judgment_line(self):
+        self.start_play()
+        g = self.game
+        with mock.patch.object(self.engine, "play_note",
+                               wraps=self.engine.play_note) as pn:
+            self.at(g.beatmap.lead_in - 0.05)
+            self.assertEqual(pn.call_count, 0)
+            self.at(g.notes[0].time + PERFECT_WIN)
+            self.assertEqual(pn.call_count, 1)
+            self.assertEqual(pn.call_args.args[1], 76)
+
+    def test_full_song_schedules_every_part_and_reaches_results(self):
+        g = self.game
+        with mock.patch.object(self.engine, "play_note",
+                               wraps=self.engine.play_note) as pn:
+            self.start_play()
+            self.run_until(lambda: g.state == "result", dt=0.1)
+        self.assertEqual(pn.call_count, 1041)
+        self.assertEqual(g.judged, 594)
+        self.assertEqual(g.miss, 594)
+        self.assertIsNone(g.player)
+        self.assertIn("致爱丽丝", self.frame)
+
+
 class TimbreLock(Game):
     song = "canon"
 
