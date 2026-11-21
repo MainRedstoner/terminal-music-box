@@ -47,13 +47,27 @@ class Library(unittest.TestCase):
         self.assertEqual(song.title("en"), song.title_en)
 
     def test_previously_partial_songs_are_full_versions(self):
-        # Ode to Joy: the complete 4-phrase theme; Jingle Bells: verse + chorus;
-        # Canon: three descending lines + quarter-note climax over the ground bass.
+        # Ode to Joy: the complete 4-phrase theme; Jingle Bells: verse + chorus.
         self.assertGreater(songs.SONGS["ode_joy"].duration, 30)
         self.assertGreater(songs.SONGS["jingle_bells"].duration, 45)
-        self.assertGreater(songs.SONGS["canon"].duration, 40)
-        self.assertEqual(songs.SONGS["canon"].title_en, "Canon in C")
-        self.assertEqual(songs.SONGS["canon"].title_zh, "卡农")
+
+    def test_canon_is_the_complete_four_part_score(self):
+        song = songs.SONGS["canon"]
+        spb = 60.0 / song.bpm
+        self.assertEqual(song.bpm, 55)
+        self.assertEqual(len(song.notes), 1956)  # 593 + 577 + 561 + 225
+        self.assertEqual(len(song.chart_notes), 593)
+        self.assertAlmostEqual(song.duration, 224.9 * spb)
+        self.assertEqual([n.midi for n in song.notes[:8]],
+                         [48, 43, 45, 40, 41, 36, 41, 43])
+        self.assertEqual([n.midi for n in song.chart_notes[:16]],
+                         [76, 74, 72, 71, 69, 67, 69, 71,
+                          72, 71, 69, 67, 65, 64, 65, 62])
+        self.assertAlmostEqual(song.chart_notes[0].time, 8 * spb)
+        final = [n.midi for n in song.notes if abs(n.time - 224 * spb) < 1e-9]
+        self.assertEqual(sorted(final), [48, 67, 72, 76])
+        self.assertEqual(song.title_en, "Canon in C")
+        self.assertEqual(song.title_zh, "卡农")
 
     def test_seq_skips_rests_but_keeps_time(self):
         notes = songs.seq([(60, 1), (0, 1), (-1, 1), (64, 2)], bpm=120)
@@ -74,14 +88,22 @@ class Beatmaps(unittest.TestCase):
             song = songs.SONGS[sid]
             bm = songs.get_beatmap(sid)
             with self.subTest(song=sid):
+                melody = song.chart_notes if song.chart_notes is not None else song.notes
                 self.assertEqual(bm.song_id, sid)
-                self.assertEqual(len(bm.notes), len(song.notes))
+                self.assertEqual(len(bm.notes), len(melody))
                 times = [n.time for n in bm.notes]
                 self.assertEqual(times, sorted(times))
-                for rn, sn in zip(bm.notes, sorted(song.notes, key=lambda n: n.time)):
+                for rn, sn in zip(bm.notes, sorted(melody, key=lambda n: n.time)):
                     self.assertIn(rn.lane, range(6))
                     self.assertAlmostEqual(rn.time, sn.time + 2.0)
                 self.assertAlmostEqual(bm.duration, max(n.time for n in bm.notes))
+
+    def test_canon_beatmap_follows_violin_one_not_the_full_ensemble(self):
+        song = songs.SONGS["canon"]
+        bm = songs.get_beatmap("canon")
+        self.assertEqual(len(bm.notes), 593)
+        self.assertLess(len(bm.notes), len(song.notes))
+        self.assertAlmostEqual(bm.notes[0].time, 8 * 60.0 / song.bpm + bm.lead_in)
 
     def test_beatmaps_are_pure_tap_notes(self):
         for sid in songs.ORDER:

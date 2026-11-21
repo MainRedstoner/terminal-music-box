@@ -15,7 +15,7 @@ class MainMenu(Screen):
         th = self.theme
         return [
             (th.t("menu.freeplay"), lambda: self.app.navigate("freeplay")),
-            (th.t("menu.rhythm"), lambda: self.app.navigate("rhythm_list")),
+            (th.t("menu.rhythm"), lambda: self.app.navigate("rhythm_menu")),
             (th.t("menu.toggle_mode"), self.app.toggle_mode),
             (th.t("menu.quit"), self.app.quit),
         ]

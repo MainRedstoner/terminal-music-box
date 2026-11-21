@@ -26,7 +26,7 @@ class MenuKeys(HeadlessCase):
             self.assertIn(UNICODE_THEME.t(key), self.frame)
 
     def test_number_shortcuts(self):
-        for key, name in (("1", "freeplay"), ("2", "rhythm_list")):
+        for key, name in (("1", "freeplay"), ("2", "rhythm_menu")):
             with self.subTest(key=key):
                 self.app.navigate("menu")
                 self.press(key)
@@ -46,7 +46,7 @@ class MenuKeys(HeadlessCase):
         self.press("down")
         self.assertEqual(self.screen.index, 1)
         self.press("enter")
-        self.assertEqual(self.app.current_name, "rhythm_list")
+        self.assertEqual(self.app.current_name, "rhythm_menu")
 
     def test_up_wraps_to_last_item(self):
         self.press("up")
@@ -78,7 +78,7 @@ class MenuMouse(HeadlessCase):
 
     def test_click_rhythm_button(self):
         self.click_label(UNICODE_THEME.t("menu.rhythm"))
-        self.assertEqual(self.app.current_name, "rhythm_list")
+        self.assertEqual(self.app.current_name, "rhythm_menu")
 
     def test_click_toggle_button(self):
         self.click_label(UNICODE_THEME.t("menu.toggle_mode"))
@@ -182,7 +182,8 @@ class Navigation(HeadlessCase):
 
 class AllScreensAtManySizes(unittest.TestCase):
     SIZES = [(80, 24), (120, 40), (46, 14), (40, 12), (30, 10), (20, 8), (12, 6), (6, 5), (5, 4)]
-    SCREENS = [("menu", {}), ("freeplay", {}), ("song_select", {}), ("rhythm_list", {}),
+    SCREENS = [("menu", {}), ("freeplay", {}), ("song_select", {}),
+               ("rhythm_menu", {}),
                ("rhythm_calib", {}), ("rhythm_keys", {}), ("rhythm_game", {"song": "canon"})]
 
     def setUp(self):

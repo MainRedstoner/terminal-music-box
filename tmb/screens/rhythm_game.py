@@ -24,7 +24,7 @@ PALETTE = [C.cyan, C.green, C.yellow, C.magenta, C.blue, C.pink]
 
 class RhythmGameScreen(Screen):
     def enter(self, song: Optional[str] = None, **kw) -> None:
-        self.song_id = song or songs.first_song_id()
+        self.song_id = song or songs.RHYTHM_ORDER[0]
         self.song = songs.get_song(self.song_id)
         self.beatmap = songs.get_beatmap(self.song_id)
         self.notes = self.beatmap.notes
@@ -167,7 +167,7 @@ class RhythmGameScreen(Screen):
             return
         if self.state == "pause":
             if is_exit(k):
-                self.app.navigate("rhythm_list")
+                self.app.navigate("rhythm_menu")
             elif k == UP:
                 self.pause_index = (self.pause_index - 1) % 2
             elif k == DOWN:
@@ -177,13 +177,13 @@ class RhythmGameScreen(Screen):
             return
         if self.state == "result":
             if is_exit(k) or k in (ENTER, SPACE):
-                self.app.navigate("rhythm_list")
+                self.app.navigate("rhythm_menu")
 
     def _pause_action(self, i: int) -> None:
         if i == 0:
             self._resume()
         else:
-            self.app.navigate("rhythm_list")
+            self.app.navigate("rhythm_menu")
 
     def update(self, dt: float) -> None:
         # Sim clock, not wall clock: a slow first-note synth render must not
@@ -312,7 +312,7 @@ class RhythmGameScreen(Screen):
                     selected=self.pause_index == 0, hits=self.hits, action=lambda: self._resume())
         draw_button(scr, bxx, by + 5, bwi, 3, th.t("rhythm.quit_to_list"), th,
                     selected=self.pause_index == 1, hits=self.hits,
-                    action=lambda: self.app.navigate("rhythm_list"))
+                    action=lambda: self.app.navigate("rhythm_menu"))
 
     def _draw_result(self, scr: Buffer) -> None:
         th = self.theme
@@ -338,5 +338,5 @@ class RhythmGameScreen(Screen):
         ctext(by + 9, "P %d   G %d   M %d" % (self.perfect, self.good, self.miss), C.gray)
         btnw = min(20, bw - 4)
         draw_button(scr, cx - btnw // 2, by + bh - 4, btnw, 3, th.t("common.back"), th,
-                    selected=True, hits=self.hits, action=lambda: self.app.navigate("rhythm_list"))
+                    selected=True, hits=self.hits, action=lambda: self.app.navigate("rhythm_menu"))
         center_text(scr, h - 1, th.t("freeplay.exit_hint"), C.dim)

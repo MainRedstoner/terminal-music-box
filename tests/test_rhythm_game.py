@@ -55,6 +55,10 @@ class Setup(Game):
         self.assertEqual(g.note_state, [0] * len(g.notes))
         self.assertEqual(g.song_time, 0.0)
 
+    def test_no_song_argument_defaults_to_canon(self):
+        self.app.navigate("rhythm_game")
+        self.assertEqual(self.app.current.song_id, "canon")
+
     def test_countdown_becomes_play_after_three_seconds(self):
         self.advance(3.1, dt=0.01)
         self.assertEqual(self.game.state, "play")
@@ -284,13 +288,13 @@ class PauseAndResult(Game):
         self.press("esc")
         self.press("down")
         self.press("enter")
-        self.assertEqual(self.app.current_name, "rhythm_list")
+        self.assertEqual(self.app.current_name, "rhythm_menu")
 
     def test_pause_menu_escape_quits_to_the_list(self):
         self.start_play()
         self.press("esc")
         self.press("ctrl+q")
-        self.assertEqual(self.app.current_name, "rhythm_list")
+        self.assertEqual(self.app.current_name, "rhythm_menu")
 
     def test_mouse_click_on_resume_button(self):
         self.start_play()
@@ -302,7 +306,7 @@ class PauseAndResult(Game):
         self.start_play()
         self.press("esc")
         self.click_label(self.app.theme.t("rhythm.quit_to_list"))
-        self.assertEqual(self.app.current_name, "rhythm_list")
+        self.assertEqual(self.app.current_name, "rhythm_menu")
 
     def test_result_after_the_full_duration(self):
         self.start_play()
@@ -332,19 +336,19 @@ class PauseAndResult(Game):
         self.start_play()
         self.run_until(lambda: self.game.state == "result", dt=0.05)
         self.press("enter")
-        self.assertEqual(self.app.current_name, "rhythm_list")
+        self.assertEqual(self.app.current_name, "rhythm_menu")
 
     def test_result_escape_returns_to_the_list(self):
         self.start_play()
         self.run_until(lambda: self.game.state == "result", dt=0.05)
         self.press("esc")
-        self.assertEqual(self.app.current_name, "rhythm_list")
+        self.assertEqual(self.app.current_name, "rhythm_menu")
 
     def test_result_mouse_back_button(self):
         self.start_play()
         self.run_until(lambda: self.game.state == "result", dt=0.05)
         self.click_label(self.app.theme.t("common.back"))
-        self.assertEqual(self.app.current_name, "rhythm_list")
+        self.assertEqual(self.app.current_name, "rhythm_menu")
 
 
 class LatencyOffset(Game):

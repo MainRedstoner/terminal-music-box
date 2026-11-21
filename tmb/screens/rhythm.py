@@ -4,25 +4,121 @@ from __future__ import annotations
 from statistics import median
 
 from ..ansi import Screen as Buffer, C
-from ..events import KeyEvent, is_exit, UP, DOWN, LEFT, RIGHT
+from ..events import (KeyEvent, ENTER, SPACE, TAB, is_exit,
+                      UP, DOWN, LEFT, RIGHT)
 from ..ui import center_text, draw_box, draw_button, draw_menu_row
-from .base import Screen, ListScreen
+from .base import Screen
 from .. import songs
 
 
-class RhythmListScreen(ListScreen):
+class RhythmMenuScreen(Screen):
+    """Two panes: a wide song selector and a compact settings column."""
+
     def enter(self, **kw):
-        lang = self.theme.lang
-        ids = list(songs.ORDER)
-        self.title = self.theme.t("rhythm.list")
-        self.back_target = "menu"
-        items = [self.theme.t("rhythm.calibration"), self.theme.t("rhythm.keys")]
-        actions = [lambda: self.app.navigate("rhythm_calib"),
-                   lambda: self.app.navigate("rhythm_keys")]
-        items += [songs.SONGS[s].title(lang) for s in ids]
-        actions += [(lambda sid=s: self.app.navigate("rhythm_game", song=sid)) for s in ids]
-        self.set_items(items, actions)
-        self.footer = self.theme.t("freeplay.exit_hint")
+        self.focus = 0  # 0 = songs, 1 = functions
+        self.song_index = 0
+        self.function_index = 0
+        self.song_ids = list(songs.RHYTHM_ORDER)
+        self.function_ids = ["rhythm_calib", "rhythm_keys"]
+
+    def _move(self, step: int) -> None:
+        if self.focus == 0:
+            n = len(self.song_ids)
+            if n:
+                self.song_index = (self.song_index + step) % n
+        else:
+            self.function_index = ((self.function_index + step)
+                                   % len(self.function_ids))
+
+    def _start_song(self, index: int) -> None:
+        self.focus = 0
+        self.song_index = index
+        if self.song_ids:
+            self.app.navigate("rhythm_game", song=self.song_ids[index])
+
+    def _start_function(self, index: int) -> None:
+        self.focus = 1
+        self.function_index = index
+        self.app.navigate(self.function_ids[index])
+
+    def _activate(self) -> None:
+        if self.focus == 0:
+            if self.song_ids:
+                self._start_song(self.song_index)
+        else:
+            self._start_function(self.function_index)
+
+    def handle_key(self, ev: KeyEvent) -> None:
+        if not ev.pressed:
+            return
+        k = ev.key
+        if is_exit(k):
+            self.app.navigate("menu")
+        elif k in (LEFT, RIGHT, TAB):
+            self.focus = 1 - self.focus
+        elif k == UP:
+            self._move(-1)
+        elif k == DOWN:
+            self._move(1)
+        elif k in (ENTER, SPACE):
+            self._activate()
+
+    def draw(self, scr: Buffer) -> None:
+        self.hits.clear()
+        th = self.theme
+        w, h = scr.w, scr.h
+        if w < 16 or h < 7:
+            if w and h:
+                center_text(scr, min(h - 1, h // 2), th.t("rhythm.title"),
+                            C.yellow, None, True)
+            return
+
+        total_w = min(w - 4, 100)
+        gap = 2
+        usable = total_w - gap
+        song_w = (usable * 2) // 3
+        function_w = usable - song_w
+        x = (w - total_w) // 2
+        top = 2
+        box_h = h - top - 2
+        rows = max(0, box_h - 2)
+        song_active = self.focus == 0
+
+        draw_box(scr, x, top, song_w, box_h, th,
+                 fg=C.cyan if song_active else C.dim,
+                 title=th.t("rhythm.list"),
+                 title_fg=C.yellow if song_active else C.gray)
+        fx = x + song_w + gap
+        draw_box(scr, fx, top, function_w, box_h, th,
+                 fg=C.cyan if not song_active else C.dim,
+                 title=th.t("rhythm.functions"),
+                 title_fg=C.yellow if not song_active else C.gray)
+
+        lang = th.lang
+        start = max(0, self.song_index - rows + 1) if rows else 0
+        for r in range(rows):
+            i = start + r
+            if i >= len(self.song_ids):
+                break
+            sid = self.song_ids[i]
+            draw_menu_row(
+                scr, x + 1, top + 1 + r, song_w - 2,
+                songs.SONGS[sid].title(lang),
+                song_active and i == self.song_index, th,
+                fg=C.white if song_active else C.gray, hits=self.hits,
+                action=(lambda idx=i: self._start_song(idx)),
+            )
+
+        labels = [th.t("rhythm.calibration"), th.t("rhythm.keys")]
+        for i, label in enumerate(labels[:rows]):
+            draw_menu_row(
+                scr, fx + 1, top + 1 + i, function_w - 2, label,
+                not song_active and i == self.function_index, th,
+                fg=C.white if not song_active else C.gray, hits=self.hits,
+                action=(lambda idx=i: self._start_function(idx)),
+            )
+
+        center_text(scr, h - 2, th.t("rhythm.menu_hint"), C.dim)
 
 
 class RhythmCalibScreen(Screen):
@@ -56,7 +152,7 @@ class RhythmCalibScreen(Screen):
             return
         k = ev.key
         if is_exit(k):
-            self.app.navigate("rhythm_list")
+            self.app.navigate("rhythm_menu")
         elif k == "r":
             self._reset()
         elif not self.done:
@@ -135,7 +231,7 @@ class RhythmCalibScreen(Screen):
         draw_button(scr, x0, by, rw, 3, reset, th,
                     hits=self.hits, action=self._reset)
         draw_button(scr, x0 + rw + 2, by, kw, 3, th.t("common.back"), th,
-                    hits=self.hits, action=lambda: self.app.navigate("rhythm_list"))
+                    hits=self.hits, action=lambda: self.app.navigate("rhythm_menu"))
         center_text(scr, h - 2, th.t("freeplay.exit_hint"), C.dim)
 
 
@@ -151,7 +247,7 @@ class RhythmKeysScreen(Screen):
         k = ev.key
         n = len(self.keys)
         if is_exit(k):
-            self.app.navigate("rhythm_list")
+            self.app.navigate("rhythm_menu")
         elif k in (UP, LEFT):
             self.index = (self.index - 1) % n
         elif k in (DOWN, RIGHT):
@@ -207,5 +303,5 @@ class RhythmKeysScreen(Screen):
             center_text(scr, y, self.status, C.green)
         btnw = min(12, bw - 4)
         draw_button(scr, bx + (bw - btnw) // 2, by, btnw, 3, th.t("common.back"), th,
-                    hits=self.hits, action=lambda: self.app.navigate("rhythm_list"))
+                    hits=self.hits, action=lambda: self.app.navigate("rhythm_menu"))
         center_text(scr, h - 2, th.t("freeplay.exit_hint"), C.dim)

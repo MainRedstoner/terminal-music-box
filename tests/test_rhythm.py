@@ -12,66 +12,59 @@ except ImportError:
     from helpers import HeadlessCase
 
 
-class RhythmList(HeadlessCase):
-    start_screen = "rhythm_list"
+class RhythmMenu(HeadlessCase):
+    start_screen = "rhythm_menu"
 
-    def test_list_shows_calibration_keys_and_every_song(self):
+    def test_shows_a_large_song_box_and_a_small_function_box(self):
         th = self.app.theme
-        expected = [th.t("rhythm.calibration"), th.t("rhythm.keys")]
-        expected += [songs.SONGS[s].title(th.lang) for s in songs.ORDER]
-        self.assertEqual(self.screen.items, expected)
-        self.assertEqual(len(self.screen.actions), len(expected))
+        self.assertEqual(self.screen.focus, 0)
+        self.assertEqual(self.screen.song_ids, ["canon"])
+        self.assertIn(th.t("rhythm.list"), self.frame)
+        self.assertIn(th.t("rhythm.functions"), self.frame)
+        self.assertIn(songs.SONGS["canon"].title("zh"), self.frame)
         self.assertIn(th.t("rhythm.calibration"), self.frame)
-        self.assertIn(songs.SONGS["twinkle"].title("zh"), self.frame)
+        self.assertIn(th.t("rhythm.keys"), self.frame)
 
-    def test_enter_opens_calibration(self):
-        self.press("enter")
-        self.assertEqual(self.app.current_name, "rhythm_calib")
-
-    def test_second_item_opens_key_config(self):
-        self.press("down")
-        self.press("enter")
-        self.assertEqual(self.app.current_name, "rhythm_keys")
-
-    def test_third_item_starts_the_first_song(self):
-        self.press("down")
-        self.press("down")
+    def test_enter_starts_the_selected_song(self):
         self.press("enter")
         self.assertEqual(self.app.current_name, "rhythm_game")
-        self.assertEqual(self.screen.song_id, songs.ORDER[0])
+        self.assertEqual(self.screen.song_id, "canon")
 
-    def test_mouse_click_on_a_song_row_starts_it(self):
+    def test_mouse_click_on_the_song_starts_it(self):
         self.click_label(songs.SONGS["canon"].title("zh"))
         self.assertEqual(self.app.current_name, "rhythm_game")
         self.assertEqual(self.screen.song_id, "canon")
 
-    def test_mouse_click_on_calibration_row(self):
+    def test_left_right_and_tab_switch_focus(self):
+        self.assertEqual(self.screen.focus, 0)
+        self.press("right")
+        self.assertEqual(self.screen.focus, 1)
+        self.press("left")
+        self.assertEqual(self.screen.focus, 0)
+        self.press("tab")
+        self.assertEqual(self.screen.focus, 1)
+        self.press("tab")
+        self.assertEqual(self.screen.focus, 0)
+
+    def test_enter_opens_the_first_function_when_focused(self):
+        self.press("tab")
+        self.press("enter")
+        self.assertEqual(self.app.current_name, "rhythm_calib")
+
+    def test_down_selects_and_opens_key_config(self):
+        self.press("tab")
+        self.press("down")
+        self.assertEqual(self.screen.function_index, 1)
+        self.press("enter")
+        self.assertEqual(self.app.current_name, "rhythm_keys")
+
+    def test_mouse_click_on_calibration(self):
         self.click_label(self.app.theme.t("rhythm.calibration"))
         self.assertEqual(self.app.current_name, "rhythm_calib")
 
-    def test_escape_returns_to_the_menu(self):
+    def test_escape_returns_to_the_main_menu(self):
         self.press("esc")
         self.assertEqual(self.app.current_name, "menu")
-
-    def test_end_jumps_to_the_last_song(self):
-        self.press("end")
-        self.assertEqual(self.screen.index, len(self.screen.items) - 1)
-        self.press("enter")
-        self.assertEqual(self.screen.song_id, songs.ORDER[-1])
-
-
-class RhythmListShort(HeadlessCase):
-    start_screen = "rhythm_list"
-    height = 10
-
-    def test_list_scrolls_and_keeps_the_selection_visible(self):
-        for _ in range(len(self.screen.items) - 1):
-            self.press("down")
-        self.assertEqual(self.screen.index, len(self.screen.items) - 1)
-        self.assertGreater(self.screen.scroll, 0)
-        self.assertIn(self.screen.items[self.screen.index], self.frame)
-        self.press("enter")
-        self.assertEqual(self.screen.song_id, songs.ORDER[-1])
 
 
 class Calibration(HeadlessCase):
@@ -139,11 +132,11 @@ class Calibration(HeadlessCase):
     def test_mouse_back_button(self):
         x, y, w, h, _action = self.screen.hits.regions[1]
         self.click(x + w // 2, y + h // 2)
-        self.assertEqual(self.app.current_name, "rhythm_list")
+        self.assertEqual(self.app.current_name, "rhythm_menu")
 
-    def test_escape_returns_to_the_list(self):
+    def test_escape_returns_to_the_rhythm_menu(self):
         self.press("esc")
-        self.assertEqual(self.app.current_name, "rhythm_list")
+        self.assertEqual(self.app.current_name, "rhythm_menu")
 
     def test_calibration_shows_the_sample_counter(self):
         self.tap_on_beat(3)
@@ -209,15 +202,13 @@ class KeyConfig(HeadlessCase):
         self.press("q")
         self.assertEqual(self.screen.keys[2], "q")
 
-    def test_escape_returns_to_the_list(self):
+    def test_escape_returns_to_the_rhythm_menu(self):
         self.press("esc")
-        self.assertEqual(self.app.current_name, "rhythm_list")
+        self.assertEqual(self.app.current_name, "rhythm_menu")
 
     def test_rebinding_survives_a_new_game(self):
         self.press("z")
         self.press("esc")
-        self.press("down")
-        self.press("down")
         self.press("enter")
         self.assertEqual(self.app.current_name, "rhythm_game")
         self.assertEqual(self.screen.lane_keys[0], "z")

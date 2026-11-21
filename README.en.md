@@ -105,8 +105,8 @@ Twinkle Twinkle). Songs loop.
 
 ## Built-in songs
 
-Eight public-domain melodies, shared by prenatal mode and the rhythm game
-(beatmaps are derived from the melodies automatically):
+Eight public-domain melodies. Prenatal mode includes the full library; the rhythm
+game contains only the complete Canon, with falling notes derived from violin I:
 
 | Song | Chinese |
 | --- | --- |
@@ -118,6 +118,11 @@ Eight public-domain melodies, shared by prenatal mode and the rhythm game
 | Canon in C | 卡农 |
 | Brahms' Lullaby | 摇篮曲 |
 | London Bridge | 伦敦桥 |
+
+Canon uses the complete three-violin-and-bass score from
+[Mutopia-2015/09/02-2047](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=2047),
+typeset by Michael Fischer v. Mollard and licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), transposed from D to C.
 
 ## Architecture
 

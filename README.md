@@ -90,7 +90,7 @@ Z X C V B N M   —— 低音 (C3..B3)
 
 ## 内置曲目
 
-全部为公有领域旋律,共 8 首(胎教与音游共用,音游谱面由旋律自动生成):
+全部为公有领域旋律,共 8 首。胎教模式可使用全部曲目;音游模式仅保留完整版《卡农》,下落谱面跟随小提琴 I:
 
 | 曲目 | 英文 |
 | --- | --- |
@@ -102,6 +102,10 @@ Z X C V B N M   —— 低音 (C3..B3)
 | 卡农 | Canon in C |
 | 摇篮曲 | Brahms' Lullaby |
 | 伦敦桥 | London Bridge |
+
+《卡农》依据 [Mutopia-2015/09/02-2047](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=2047)
+的三小提琴与低音完整乐谱移调至 C,排版者 Michael Fischer v. Mollard,依据
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) 使用。
 
 ## 架构
 
