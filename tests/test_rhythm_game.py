@@ -389,8 +389,14 @@ class TurkishMarch(Game):
     def test_the_chart_is_the_right_hand_melody(self):
         g = self.game
         self.assertEqual(g.beatmap.song_id, "turkish_march")
-        self.assertEqual(len(g.notes), len(g.song.notes))
-        self.assertEqual(g.notes[0].time, g.song.notes[0].time + g.beatmap.lead_in)
+        self.assertEqual(len(g.notes), len(g.song.chart_notes))
+        self.assertLess(len(g.notes), len(g.song.notes))
+        self.assertEqual(g.notes[0].time,
+                         g.song.chart_notes[0].time + g.beatmap.lead_in)
+
+    def test_the_timbre_is_locked_to_the_electric_piano(self):
+        self.assertEqual(self.game.timbre, "pling")
+        self.assertEqual(self.game.player.timbre, "pling")
 
     def test_the_first_note_can_be_hit(self):
         self.start_play()

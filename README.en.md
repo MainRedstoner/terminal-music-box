@@ -93,10 +93,11 @@ Twinkle Twinkle). Songs loop.
 ### Rhythm Game
 - The melody auto-plays for the whole run — each note sounds exactly as it
   crosses the judgment line. Your taps are silent judgment only.
-- Canon's timbre is locked to the didgeridoo, regardless of the free-play
-  timbre selection.
-- Turkish March's chart follows the right-hand theme through the rondo form
-  A minor - C major - A minor - A major - A minor.
+- Canon's timbre is locked to the didgeridoo and Turkish March's to the
+  electric piano, regardless of the free-play timbre selection.
+- Turkish March is the complete rondo
+  (A-B-A'-C-D-E-C-A-B-A'-transition-coda); its chart follows the right-hand
+  theme, and dense passages stay on the four inner lanes.
 - Default keys: `A S D J K L` (6 lanes), rebindable in **Key Config**
   (binding a key already in use swaps the two lanes).
 - Canon's chart is authored: dense phrases use the middle four lanes
@@ -140,10 +141,11 @@ Minuet in G, BWV Anh. 114 (Christian Petzold), uses the public-domain two-staff
 score from [Mutopia-2017/01/19-75](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=75),
 including both repeated sections and the written grace note.
 
-Turkish March is condensed from
+Turkish March uses the complete written-through score from
 [Mutopia-2015/08/13-108](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=108),
-typeset by Rune Zedeler and Chris Sawer (public domain); the chart follows the
-right-hand theme through the A-B-A-C-A rondo form with repeats removed.
+typeset by Rune Zedeler and Chris Sawer (public domain); repeats are not taken.
+Auto-play keeps both piano hands, while the chart follows the right-hand melody
+with ornaments shorter than a sixteenth removed.
 
 ## Architecture
 

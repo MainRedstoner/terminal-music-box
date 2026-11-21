@@ -52,28 +52,34 @@ class Library(unittest.TestCase):
         self.assertGreater(songs.SONGS["ode_joy"].duration, 30)
         self.assertGreater(songs.SONGS["jingle_bells"].duration, 45)
 
-    def test_turkish_march_is_in_the_rhythm_library(self):
+    def test_turkish_march_is_the_complete_rondo(self):
         song = songs.SONGS["turkish_march"]
         self.assertIn("turkish_march", songs.RHYTHM_ORDER)
         self.assertEqual(song.title_zh, "土耳其进行曲")
         self.assertEqual(song.title_en, "Turkish March")
         self.assertEqual(song.bpm, 120)
-        self.assertGreater(song.duration, 40)
-        self.assertIsNone(song.timbre)
+        self.assertGreater(song.duration, 120)
+        self.assertEqual(len(song.notes), 1442)       # both piano hands
+        self.assertEqual(len(song.chart_notes), 604)  # right-hand top line
+        self.assertEqual(song.timbre, "pling")
 
-    def test_turkish_march_opens_with_the_turn_and_climbs_to_c_sharp_six(self):
+    def test_turkish_march_opens_with_the_turn_and_reaches_e6(self):
         song = songs.SONGS["turkish_march"]
-        self.assertEqual([n.midi for n in song.notes[:4]], [71, 69, 68, 69])
-        self.assertEqual(max(n.midi for n in song.notes), 85)  # C#6, A-major episode
-        self.assertEqual([n.midi for n in song.notes[-5:]],
-                         [77, 74, 72, 71, 69])
+        self.assertEqual([n.midi for n in song.chart_notes[:4]],
+                         [71, 69, 68, 69])
+        self.assertEqual(min(n.midi for n in song.chart_notes), 64)
+        self.assertEqual(max(n.midi for n in song.chart_notes), 88)  # E6, coda
+        self.assertEqual([n.midi for n in song.chart_notes[-5:]],
+                         [81, 88, 81, 81, 81])
 
-    def test_only_canon_locks_a_timbre(self):
-        # The rhythm game always plays canon on the didgeridoo; other songs
-        # follow the user's timbre.
+    def test_rhythm_songs_lock_their_timbres(self):
+        # Canon sounds on the didgeridoo, Turkish March on the electric piano;
+        # every other song follows the user's timbre.
         self.assertEqual(songs.SONGS["canon"].timbre, "didgeridoo")
+        self.assertEqual(songs.SONGS["turkish_march"].timbre, "pling")
         self.assertEqual({sid for sid in songs.ORDER
-                          if songs.SONGS[sid].timbre is not None}, {"canon"})
+                          if songs.SONGS[sid].timbre is not None},
+                         {"canon", "turkish_march"})
 
     def test_canon_is_the_complete_four_part_score(self):
         song = songs.SONGS["canon"]
@@ -189,9 +195,25 @@ class Beatmaps(unittest.TestCase):
         self.assertTrue(all(len(notes) <= 2 for notes in simultaneous.values()))
 
     def test_turkish_march_beatmap_uses_every_lane(self):
+        song = songs.SONGS["turkish_march"]
         bm = songs.get_beatmap("turkish_march")
-        self.assertEqual(len(bm.notes), len(songs.SONGS["turkish_march"].notes))
+        self.assertEqual(len(bm.notes), len(song.chart_notes))
         self.assertEqual({n.lane for n in bm.notes}, set(range(6)))
+
+    def test_turkish_march_dense_notes_stay_off_the_outer_lanes(self):
+        song = songs.SONGS["turkish_march"]
+        bm = songs.get_beatmap("turkish_march")
+        times = [n.time for n in song.chart_notes]
+        dense_gap = 0.25 * 60.0 / song.bpm
+        dense = 0
+        for i, rn in enumerate(bm.notes):
+            prev = times[i] - times[i - 1] if i else float("inf")
+            nxt = (times[i + 1] - times[i]
+                   if i + 1 < len(times) else float("inf"))
+            if min(prev, nxt) <= dense_gap:
+                dense += 1
+                self.assertIn(rn.lane, (1, 2, 3, 4))
+        self.assertGreater(dense, 300)
 
     def test_beatmaps_are_pure_tap_notes(self):
         for sid in songs.ORDER:
