@@ -180,6 +180,34 @@ class Navigation(HeadlessCase):
         self.assertEqual((self.term.screen.w, self.term.screen.h), (10, 4))
 
 
+class StepOrder(unittest.TestCase):
+    """A frame advances the simulation before it dispatches the input."""
+
+    class _Probe:
+        def __init__(self):
+            self.t = 0.0
+            self.seen = None
+
+        def update(self, dt):
+            self.t += dt
+
+        def handle_key(self, ev):
+            self.seen = self.t
+
+        def draw(self, scr):
+            pass
+
+    def test_a_key_sees_the_time_of_its_own_frame(self):
+        term = HeadlessTerminal()
+        app = App(term, AudioEngine(backend=NullBackend(), realtime=False), Config())
+        probe = self._Probe()
+        app.current = probe
+        term.key("a")
+        app.step(0.25)
+        self.assertEqual(probe.t, 0.25)
+        self.assertEqual(probe.seen, 0.25)
+
+
 class AllScreensAtManySizes(unittest.TestCase):
     SIZES = [(80, 24), (120, 40), (46, 14), (40, 12), (30, 10), (20, 8), (12, 6), (6, 5), (5, 4)]
     SCREENS = [("menu", {}), ("freeplay", {}), ("song_select", {}),

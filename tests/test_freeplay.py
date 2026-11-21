@@ -171,6 +171,9 @@ class FreePlay(HeadlessCase):
         self.advance(ACTIVITY_WINDOW + 0.1, dt=0.05)
         self.assertFalse(p.playing)
         self.press("q")
+        # The frame clock advances before input is dispatched, so the resume
+        # takes effect on the following frame's update.
+        self.step()
         self.assertTrue(p.playing)
         pos = p.pos
         self.advance(0.5)

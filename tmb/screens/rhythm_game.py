@@ -155,10 +155,14 @@ class RhythmGameScreen(Screen):
             elif is_exit(k):
                 return  # only ESC pauses during play; ignore ^Q/^D/^C
             elif k in self.key_lane:
+                held = self.key_down.get(k, False)
                 self.key_down[k] = True
-                if ev.repeat:
-                    return  # auto-repeat must not re-judge lane notes
                 self.last_press[k] = self.clock
+                # Auto-repeat must not judge twice. Kitty reports it explicitly;
+                # Windows/console backends only report a second key-down for a
+                # key that is still held, so `held` catches those too.
+                if held or ev.repeat:
+                    return
                 self._hit_lane(self.key_lane[k])
             return
         if self.state == "countdown":

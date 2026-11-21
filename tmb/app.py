@@ -21,7 +21,9 @@ class App:
         self.current = None
         self.current_name = ""
         self.running = True
-        self._last = time.monotonic()
+        # perf_counter, not monotonic: on Windows monotonic() is GetTickCount64
+        # with a 15.6 ms resolution, which quantises every frame delta.
+        self._last = time.perf_counter()
 
     def register(self, name: str, factory: Callable) -> None:
         self._factories[name] = factory
@@ -67,13 +69,28 @@ class App:
             if self.current is not None:
                 self.current.handle_mouse(e)
 
-    def step(self, dt: float) -> None:
-        for e in self.terminal.poll(0.016):
+    def step(self, dt: Optional[float] = None) -> None:
+        """Poll input, advance the simulation, then handle the input.
+
+        Order matters for timing accuracy: the frame clock is advanced *before*
+        events are dispatched, so a key press is judged against the time it
+        arrived instead of the previous frame (measured ~25 ms stale on
+        Windows). Input is polled first so the frame delta covers the wait; a
+        caller (tests, scripts) can still pass an explicit dt.
+        """
+        if not self.running:
+            return
+        events = self.terminal.poll(0.016)
+        if dt is None:
+            now = time.perf_counter()
+            dt = min(0.1, now - self._last)
+            self._last = now
+        if self.current is not None:
+            self.current.update(dt)
+        for e in events:
             self._dispatch(e)
         if not self.running:
             return
-        if self.current is not None:
-            self.current.update(dt)
         scr = self.terminal.screen
         scr.clear()
         if self.current is not None:
@@ -84,13 +101,10 @@ class App:
         self.audio.start()
         self._preload_timbre()
         self.navigate("menu")
-        self._last = time.monotonic()
+        self._last = time.perf_counter()
         try:
             while self.running:
-                now = time.monotonic()
-                dt = min(0.1, now - self._last)
-                self._last = now
-                self.step(dt)
+                self.step()
         finally:
             self._diag("run loop exited")
             self.audio.stop()

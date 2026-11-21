@@ -119,9 +119,9 @@ class Judgment(Game):
         g = self.game
         n0, n1 = g.notes[0], g.notes[1]
         self.at(n0.time)
-        self.press(self.lane_key(n0))
+        self.tap(self.lane_key(n0))
         self.at(n1.time + PERFECT_WIN + 0.03)
-        self.press(self.lane_key(n1))
+        self.tap(self.lane_key(n1))
         self.assertEqual((g.perfect, g.good, g.miss), (1, 1, 0))
         self.assertEqual(g.combo, 2)
         self.assertEqual(g.score, 303 + 102)
@@ -131,7 +131,7 @@ class Judgment(Game):
         g = self.game
         for n in g.notes[:2]:
             self.at(n.time)
-            self.press(self.lane_key(n))
+            self.tap(self.lane_key(n))
         self.assertEqual(g.combo, 2)
         self.assertEqual(g.score, 303 + 306)
 
@@ -184,6 +184,20 @@ class Judgment(Game):
         self.assertEqual(g.judged, 1)
         self.assertTrue(g.key_down.get(key))
 
+    def test_a_second_key_down_while_held_does_not_judge(self):
+        # Windows/console backends report auto-repeat as a plain key-down, so a
+        # press for a key that is still held must be ignored as well.
+        self.start_play()
+        g = self.game
+        key = self.lane_key(g.notes[0])
+        self.at(g.notes[0].time)
+        self.press(key)
+        with mock.patch.object(g, "_hit_lane") as hit:
+            self.term.send(KeyEvent(key, pressed=True))
+            self.step()
+        hit.assert_not_called()
+        self.assertEqual(g.judged, 1)
+
     def test_legacy_terminal_expires_the_pressed_key_look(self):
         self.term.release_events = False
         self.start_play()
@@ -230,8 +244,8 @@ class Melody(Game):
         g = self.game
         self.advance(2.5)
         self.assertGreaterEqual(self.engine.active(), 1)
-        pos = g.player.pos
         self.press("esc")
+        pos = g.player.pos
         self.advance(0.5)
         self.assertEqual(g.player.pos, pos)
         self.press("enter")
@@ -273,8 +287,8 @@ class PauseAndResult(Game):
     def test_resume_runs_the_countdown_again_and_keeps_progress(self):
         self.start_play()
         self.advance(1.0)
-        t = self.game.song_time
         self.press("esc")
+        t = self.game.song_time
         self.press("enter")
         self.assertEqual(self.game.state, "countdown")
         self.assertAlmostEqual(self.game.countdown, COUNTDOWN, places=1)
@@ -325,7 +339,7 @@ class PauseAndResult(Game):
         g = self.game
         for n in g.notes:
             self.at(n.time)
-            self.press(self.lane_key(n))
+            self.tap(self.lane_key(n))
         self.run_until(lambda: g.state == "result", dt=0.05)
         self.assertEqual(g.miss, 0)
         self.assertEqual(g.perfect, len(g.notes))
@@ -357,14 +371,14 @@ class LatencyOffset(Game):
         self.assertEqual(self.game.offset_sec, 0.1)
         self.start_play()
         n = self.game.notes[0]
-        self.at(n.time + 0.1)
+        self.at(n.time + 0.09)
         self.press(self.lane_key(n))
         self.assertEqual(self.game.perfect, 1)
 
     def test_without_the_offset_the_same_press_is_only_good(self):
         self.start_play()
         n = self.game.notes[0]
-        self.at(n.time + 0.1)
+        self.at(n.time + 0.09)
         self.press(self.lane_key(n))
         self.assertEqual(self.game.perfect, 0)
         self.assertEqual(self.game.good, 1)
