@@ -61,9 +61,18 @@ class RhythmMenuScreen(Screen):
 
     def update(self, dt: float) -> None:
         sid = self._pending_song
-        if sid is not None and self._song_ready(sid):
+        if sid is None:
+            return
+        if self._song_ready(sid):
             self._pending_song = None
             self.app.navigate("rhythm_game", song=sid)
+            return
+        # Healing: if the last request ran to completion but the gate is still
+        # shut, kick preload again instead of waiting forever.
+        active, done, total = self.audio.preload_status()
+        if not active and total > 0 and done >= total:
+            timbre, midis = self._song_audio(sid)
+            self.audio.preload(timbre, midis)
 
     def exit(self) -> None:
         self._pending_song = None

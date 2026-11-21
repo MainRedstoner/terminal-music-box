@@ -454,6 +454,16 @@ def get_timbre(tid: str) -> Timbre:
     return TIMBRES.get(tid, TIMBRES["harp"])
 
 
+def render_note(args) -> NoteBuffers:
+    """Render one (timbre, midi) pair — the AudioEngine's process-pool worker.
+
+    Must stay module-level so multiprocessing can pickle it by reference, and
+    this module is all the worker needs to import (pure math, no backends).
+    """
+    tid, midi = args
+    return get_timbre(tid).render(midi)
+
+
 def timbre_name(tid: str, lang: str) -> str:
     t = get_timbre(tid)
     return t.name_zh if lang == "zh" else t.name_en

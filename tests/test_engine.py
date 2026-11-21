@@ -227,6 +227,37 @@ class Preload(unittest.TestCase):
         harp = sum(1 for tid, _ in self.eng._cache if tid == "harp")
         self.assertLess(harp, 4)
 
+    def test_pinned_request_survives_cache_pressure(self):
+        """Regression: two scores bigger than the cache together.
+
+        Alternating them used to let FIFO eviction eat the pending score's own
+        oldest notes: the preload reported done == total, yet is_preloaded()
+        stayed false forever, so clicking the song never entered the game.
+        """
+        from unittest import mock
+        score = tuple(range(60, 68))  # 8 keys: exactly CACHE_LIMIT here
+        other = (72, 74)
+        with mock.patch("tmb.audio.engine.CACHE_LIMIT", 8), \
+                mock.patch.dict(os.environ, {"TMB_NO_MP": "1"}):
+            self.eng.preload("bit", score)
+            self._wait_idle()
+            self.assertTrue(self.eng.is_preloaded("bit", score))
+            self.eng.preload("xylophone", other)  # evicts two bit notes
+            self._wait_idle()
+            self.eng.preload("bit", score)        # re-request the missing two
+            self._wait_idle()
+            self.assertTrue(self.eng.is_preloaded("bit", score))
+
+    def test_request_bigger_than_cache_trims_back_afterwards(self):
+        from unittest import mock
+        score = tuple(range(60, 68))  # wider than the patched limit
+        with mock.patch("tmb.audio.engine.CACHE_LIMIT", 8), \
+                mock.patch.dict(os.environ, {"TMB_NO_MP": "1"}):
+            self.eng.preload("bit", score)
+            self._wait_idle()
+            self.assertTrue(self.eng.is_preloaded("bit", score))
+            self.assertLessEqual(len(self.eng._cache), CACHE_LIMIT)
+
     def test_preload_status_reports_progress_until_the_worker_finishes(self):
         self.eng.preload("bit", (60, 62))
         done, total = self._wait_idle()

@@ -8,16 +8,23 @@ midi) so repeated notes are cheap. No third-party dependencies.
 from __future__ import annotations
 
 import math
+import os
 import threading
 import time
 from array import array
 from typing import Dict, List, Optional, Tuple
 
 from .backends import Backend, open_backend
-from .synth import SR, NoteBuffers, Timbre, fade_out, get_timbre, zeros
+from .synth import SR, NoteBuffers, Timbre, fade_out, get_timbre, render_note, zeros
 
 Segment = Tuple[array, bool]
-CACHE_LIMIT = 64  # long natural tails make rendered notes large; bound memory
+# Long natural tails make rendered notes large (~0.1-1.3 MB per key), so
+# memory stays bounded. 96 lets the two biggest rhythm scores (56 + 39 keys)
+# stay resident together; smaller values make every switch re-render.
+CACHE_LIMIT = 96
+# Below this many keys a preload finishes faster than spawning/queuing in the
+# process pool, so it renders inline instead.
+MP_MIN_NOTES = 4
 MIX_CEILING = 0.85   # pre-master peak where the adaptive mix starts ducking
 MIX_RELEASE = 0.008  # per-chunk recovery (~1.2 s back to full level)
 
@@ -28,6 +35,27 @@ def _limit(s: float) -> float:
         return s
     k = 0.8 + 0.2 * math.tanh((a - 0.8) / 0.2)
     return k if s >= 0 else -k
+
+
+def _mp_enabled() -> bool:
+    """True when note rendering may use worker processes (env kill-switch)."""
+    return os.environ.get("TMB_NO_MP") is None and (os.cpu_count() or 1) > 1
+
+
+_mp_pool = None
+_mp_pool_lock = threading.Lock()
+
+
+def _get_pool():
+    """Lazily start the shared render pool (one per process, reused)."""
+    global _mp_pool
+    with _mp_pool_lock:
+        if _mp_pool is None:
+            import multiprocessing
+            # Keep one core for the mixer thread and the UI.
+            workers = max(1, min(4, (os.cpu_count() or 2) - 1))
+            _mp_pool = multiprocessing.Pool(workers)
+        return _mp_pool
 
 
 class Voice:
@@ -160,6 +188,9 @@ class AudioEngine:
         self._next_id = 1
         self._cache: Dict[Tuple[str, int], NoteBuffers] = {}
         self._cache_lock = threading.Lock()
+        # Keys of the active preload request (None when idle). Eviction must
+        # never drop these or the "is the song ready" gate can never open.
+        self._pinned: Optional[set] = None
         self._preload_lock = threading.Lock()
         self._preload_gen = 0
         self._preload_tid: Optional[str] = None
@@ -278,12 +309,43 @@ class AudioEngine:
             # Render outside the lock: it can take hundreds of ms and must not
             # block the mixer thread or concurrent preloads.
             nb = get_timbre(tid).render(midi)
-            with self._cache_lock:
-                if key not in self._cache:
-                    if len(self._cache) >= CACHE_LIMIT:
-                        self._cache.pop(next(iter(self._cache)))
-                    self._cache[key] = nb
+            self._store(tid, midi, nb)
         return nb
+
+    def _store(self, tid: str, midi: int, nb: NoteBuffers) -> None:
+        key = (tid, midi)
+        with self._cache_lock:
+            if key not in self._cache:
+                self._evict_slot()
+                self._cache[key] = nb
+
+    def _evict_slot(self) -> None:
+        """Drop one cache entry before an insert, protecting the request.
+
+        Eviction is FIFO (dicts keep insertion order), but a note belonging to
+        the active preload request must survive: the rhythm menu waits for the
+        whole set to be cached before starting a song, and dropping one of its
+        notes can make the set permanently uncachable — the "clicked a song,
+        loading finished, never entered" bug. If every entry is pinned the
+        cache temporarily outgrows CACHE_LIMIT; _trim_cache restores the bound
+        once the request ends.
+        """
+        if len(self._cache) < CACHE_LIMIT:
+            return
+        pinned = self._pinned
+        for key in self._cache:
+            if pinned is None or key not in pinned:
+                del self._cache[key]
+                return
+
+    def _trim_cache(self) -> None:
+        """Restore the CACHE_LIMIT bound after a pinned request finishes.
+
+        Pops oldest-first, so the just-rendered request (the newest entries)
+        is what survives.
+        """
+        while len(self._cache) > CACHE_LIMIT:
+            self._cache.pop(next(iter(self._cache)))
 
     def preload(self, tid: str, midis) -> None:
         """Render (tid, midi) buffers in a background daemon thread.
@@ -295,8 +357,12 @@ class AudioEngine:
         with self._preload_lock:
             self._preload_gen += 1
             gen = self._preload_gen
+            keys = {(tid, m) for m in midis}
             with self._cache_lock:
                 todo = [m for m in midis if (tid, m) not in self._cache]
+                # Pin the whole requested set (not just todo): already-cached
+                # keys are part of the start gate too.
+                self._pinned = keys if todo else None
             self._preload_tid = tid if todo else None
             self._preload_total = len(todo)
             self._preload_done = 0
@@ -306,6 +372,27 @@ class AudioEngine:
                          name="tmb-preload", daemon=True).start()
 
     def _preload_work(self, tid: str, midis, gen: int) -> None:
+        try:
+            if len(midis) >= MP_MIN_NOTES and _mp_enabled():
+                self._preload_parallel(tid, midis, gen)
+            else:
+                self._preload_serial(tid, midis, gen)
+        except Exception:
+            # A broken pool must not wedge the start gate; finish inline.
+            # _preload_serial skips already-cached keys, so partial work stays.
+            with self._preload_lock:
+                live = gen == self._preload_gen
+            if live:
+                self._preload_serial(tid, midis, gen)
+        with self._preload_lock:
+            if gen != self._preload_gen:
+                return
+            self._preload_tid = None
+            with self._cache_lock:
+                self._pinned = None
+                self._trim_cache()
+
+    def _preload_serial(self, tid: str, midis, gen: int) -> None:
         for m in midis:
             with self._preload_lock:
                 if gen != self._preload_gen:
@@ -314,9 +401,26 @@ class AudioEngine:
             with self._preload_lock:
                 if gen == self._preload_gen:
                     self._preload_done += 1
-        with self._preload_lock:
-            if gen == self._preload_gen:
-                self._preload_tid = None
+
+    def _preload_parallel(self, tid: str, midis, gen: int) -> None:
+        """Render the keys in worker processes, inserting as results land.
+
+        Every insert re-checks the generation, so a superseded request drops
+        out after at most one in-flight note and cancels the queued rest.
+        """
+        pool = _get_pool()
+        futures = [(m, pool.apply_async(render_note, ((tid, m),),
+                                         error_callback=lambda e: None))
+                   for m in midis]
+        for i, (m, fut) in enumerate(futures):
+            nb = fut.get(timeout=120.0)
+            with self._preload_lock:
+                if gen != self._preload_gen:
+                    for _, f in futures[i:]:
+                        f.cancel()  # no-op on finished results
+                    return
+                self._preload_done += 1
+            self._store(tid, m, nb)
 
     def preload_status(self) -> Tuple[bool, int, int]:
         """Return (active, rendered, total) for the latest preload request.
