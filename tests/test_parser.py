@@ -6,7 +6,7 @@ import unittest
 from unittest import mock
 
 from tmb.events import KeyEvent, MouseEvent
-from tmb.term_posix import _Parser, under_wsl
+from tmb.term_posix import _Parser, _parse_flags_reply, under_wsl
 
 
 def keys(events):
@@ -147,6 +147,18 @@ class UnderWsl(unittest.TestCase):
             self.assertFalse(under_wsl())
         with mock.patch("builtins.open", side_effect=OSError):
             self.assertFalse(under_wsl())
+
+
+class FlagsReply(unittest.TestCase):
+    def test_flags_replies_are_parsed(self):
+        self.assertEqual(_parse_flags_reply(b"\x1b[?3u"), 3)
+        self.assertEqual(_parse_flags_reply(b"\x1b[?0u"), 0)
+        self.assertEqual(_parse_flags_reply(b"\x1b[?61;4;6c\x1b[?23;1u"), 23)
+
+    def test_non_replies_give_none(self):
+        self.assertIsNone(_parse_flags_reply(b"\x1b[?62;1;6c"))
+        self.assertIsNone(_parse_flags_reply(b"plain bytes"))
+        self.assertIsNone(_parse_flags_reply(b"\x1b[?u"))
 
 
 class ParserPending(unittest.TestCase):

@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import codecs
 import os
+import re
 import select
 import signal
 import sys
 import time
-from typing import List
+from typing import List, Optional
 
 from .events import (KeyEvent, MouseEvent, ResizeEvent, Event,
                      UP, DOWN, LEFT, RIGHT, HOME, END, PGUP, PGDN, DELETE,
@@ -229,6 +230,17 @@ class _Parser:
         return MouseEvent(x, y, btn, "press" if press else "release")
 
 
+def _parse_flags_reply(buf: bytes) -> Optional[int]:
+    """First kitty flags-reply (``CSI ? flags u``) in *buf*, else None."""
+    m = re.search(rb"\x1b\[\?([\d;]+)u", buf)
+    if m:
+        try:
+            return int(m.group(1).split(b";")[0])
+        except ValueError:
+            return None
+    return None
+
+
 class PosixBackend:
     name = "posix"
     release_events = False  # set True when the kitty protocol is negotiated
@@ -244,6 +256,14 @@ class PosixBackend:
         self._resized = False
         self._old_handler = None
         self._kitty = False
+        self._diag_log = None
+        path = os.environ.get("TMB_LOG_INPUT")
+        if path:
+            try:
+                self._diag_log = open("%s.%d" % (path, os.getpid()), "a",
+                                      encoding="utf-8", buffering=1)
+            except OSError:
+                self._diag_log = None
 
     def setup(self) -> None:
         termios = self._termios
@@ -263,6 +283,8 @@ class PosixBackend:
         # we skip it so key-up events (needed for sustained timbres) keep
         # flowing. Native terminals deliver releases fine either way.
         self.use_alt_screen = not (self._kitty and under_wsl())
+        self._diag("setup: kitty=%r release_events=%r use_alt_screen=%r"
+                   % (self._kitty, self.release_events, self.use_alt_screen))
         try:
             self._old_handler = signal.getsignal(signal.SIGWINCH)
             signal.signal(signal.SIGWINCH, self._on_winch)
@@ -276,7 +298,6 @@ class PosixBackend:
         flags and DA1. A ``CSI ? <flags> u`` reply proves support; a DA1-only
         reply (or silence) means unsupported and we pop the flags again.
         """
-        import re
         try:
             out = sys.stdout.buffer
             out.write(b"\x1b[>3u\x1b[?u\x1b[c")
@@ -295,25 +316,79 @@ class PosixBackend:
                 kitty = True
                 break
         if not kitty:
+            # The push may still have taken effect even though the reply was
+            # missed (slow terminal); clear it and check whether the terminal
+            # is kitty-capable after all.
             try:
-                out.write(b"\x1b[<u")  # pop the flags we pushed
+                out.write(b"\x1b[<u\x1b[=0;1u")
                 out.flush()
             except Exception:
                 pass
+            if self._kitty_flags(0.2) not in (0, None):
+                self._kitty_shutdown()
         return kitty
 
+    def _kitty_flags(self, timeout: float) -> Optional[int]:
+        """Query the terminal's active kitty flags; None when it stays silent."""
+        try:
+            sys.stdout.buffer.write(b"\x1b[?u")
+            sys.stdout.buffer.flush()
+        except Exception:
+            return None
+        buf = b""
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            r, _, _ = select.select([self._fd], [], [], max(0.0, end - time.monotonic()))
+            if r:
+                buf += os.read(self._fd, 65536)
+                flags = _parse_flags_reply(buf)
+                if flags is not None:
+                    self._diag("kitty_flags -> %d (%r)" % (flags, buf))
+                    return flags
+        self._diag("kitty_flags -> None (no reply)")
+        return None
+
+    def _drain_stdin(self, seconds: float) -> None:
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            r, _, _ = select.select([self._fd], [], [], max(0.0, end - time.monotonic()))
+            if not r:
+                return
+            os.read(self._fd, 65536)
+
+    def _kitty_shutdown(self) -> None:
+        """Pop the pushed kitty flags and verify they actually cleared.
+
+        ConPTY behind WSL parses client output asynchronously and drops the
+        tail of a heavy stream when the process exits — the pop then never
+        takes effect and the shell inherits kitty-encoded keys. The flags
+        query forces a round trip; if the replies stay inconclusive, hold the
+        process briefly so ConPTY can still consume the pending escapes.
+        """
+        try:
+            self._diag("kitty_shutdown: begin")
+            for attempt in range(3):
+                self._drain_stdin(0.1)  # stale replies first
+                sys.stdout.buffer.write(b"\x1b[<u\x1b[=0;1u")
+                sys.stdout.buffer.flush()
+                if self._kitty_flags(0.25) in (0, None):
+                    self._diag("kitty_shutdown: cleared on attempt %d" % (attempt + 1))
+                    return
+            time.sleep(0.3)  # inconclusive: let the async parser drain
+            self._diag("kitty_shutdown: inconclusive after retries")
+        except Exception:
+            pass
+
     def teardown(self) -> None:
+        self._diag("teardown: begin (kitty=%r)" % self._kitty)
         if self._kitty:
             self._kitty = False
             self.release_events = False
-            try:
-                sys.stdout.buffer.write(b"\x1b[<u")
-                sys.stdout.buffer.flush()
-            except Exception:
-                pass
+            self._kitty_shutdown()
         if self._old is not None:
             self._termios.tcsetattr(self._fd, self._termios.TCSANOW, self._old)
             self._old = None
+        self._diag("teardown: end")
         try:
             if self._old_handler is not None:
                 signal.signal(signal.SIGWINCH, self._old_handler)
@@ -322,6 +397,15 @@ class PosixBackend:
 
     def _on_winch(self, *_):
         self._resized = True
+
+    def _diag(self, msg: str) -> None:
+        """Append to the TMB_LOG_INPUT file when input diagnostics are on."""
+        if self._diag_log is not None:
+            try:
+                self._diag_log.write(msg + "\n")
+                self._diag_log.flush()
+            except Exception:
+                pass
 
     def teardown(self) -> None:
         if self._old is not None:
@@ -357,7 +441,9 @@ class PosixBackend:
         if r:
             data = os.read(fd, 65536)
             if data:
+                n = len(events)
                 events += self._parser.feed(data)
+                self._diag("in=%r -> %r" % (data, events[n:]))
             while True:
                 r, _, _ = select.select([fd], [], [], 0)
                 if not r:
@@ -365,7 +451,9 @@ class PosixBackend:
                 data = os.read(fd, 65536)
                 if not data:
                     break
+                n = len(events)
                 events += self._parser.feed(data)
+                self._diag("in=%r -> %r" % (data, events[n:]))
         if self._parser.has_pending():
             r, _, _ = select.select([fd], [], [], 0.03)
             if r:
