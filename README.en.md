@@ -54,15 +54,8 @@ per-timbre sound settings) persist to
 ## Controls
 
 ### Main menu
-`↑/↓` select · `Enter` confirm · mouse click · `1–5` shortcuts.
+`↑/↓` select · `Enter` confirm · mouse click · `1–4` shortcuts.
 `^Q`/`^D`/`^C`/`Esc` quit.
-
-### Sound Settings
-Per-timbre **volume** (0–2.0 via `←`/`→`) and **note length** (0.25–4.0× via
-`A`/`D`; ringing timbres can only be trimmed down to a quarter of their
-natural tail, sustained timbres can stretch to 4×). `Enter` previews the
-selected timbre, `R` restores its defaults (volume 1.0, natural length —
-identical to the original build). Settings save automatically.
 
 ### Free Play
 Three diatonic C-major octaves (7 natural notes per row):
@@ -78,6 +71,12 @@ Z X C V B N M   — low   (C3..B3)
 - **Key hold**: on Kitty-protocol terminals (or Windows terminals), sustained
   timbres (flute, bit, didgeridoo) sound for as long as the key is held; other
   terminals keep fixed-length notes, and holding never re-triggers a note.
+  WSL (ConPTY) stops delivering key releases on the alternate screen, so the
+  app automatically skips it there to keep key-up events flowing.
+- **Volume / length**: the strip below the keyboard — `↑/↓` switches between
+  volume and note length, `←/→` steps the current timbre's value (volume
+  0–2.0, length 0.25–4×; ringing timbres can only be trimmed). Changes apply
+  instantly; bit defaults to 0.25× length.
 - `^T` — toggle prenatal mode.
 - `^A` — choose the prenatal song.
 - `^Q`/`^D`/`^C`/`Esc` — back to menu.

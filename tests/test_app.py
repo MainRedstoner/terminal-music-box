@@ -22,8 +22,7 @@ class MenuKeys(HeadlessCase):
         self.assertEqual(self.app.current_name, "menu")
         self.assertIn(UNICODE_THEME.t("app.title"), self.frame)
         self.assertTrue(has_cjk(self.frame))
-        for key in ("menu.freeplay", "menu.rhythm", "menu.sound",
-                    "menu.toggle_mode", "menu.quit"):
+        for key in ("menu.freeplay", "menu.rhythm", "menu.toggle_mode", "menu.quit"):
             self.assertIn(UNICODE_THEME.t(key), self.frame)
 
     def test_number_shortcuts(self):
@@ -33,18 +32,14 @@ class MenuKeys(HeadlessCase):
                 self.press(key)
                 self.assertEqual(self.app.current_name, name)
 
-    def test_number_three_opens_sound_settings(self):
+    def test_number_three_toggles_mode(self):
         self.press("3")
-        self.assertEqual(self.app.current_name, "sound_settings")
-
-    def test_number_four_toggles_mode(self):
-        self.press("4")
         self.assertEqual(self.cfg.mode, "ascii")
-        self.press("4")
+        self.press("3")
         self.assertEqual(self.cfg.mode, "unicode")
 
-    def test_number_five_quits(self):
-        self.press("5")
+    def test_number_four_quits(self):
+        self.press("4")
         self.assertFalse(self.app.running)
 
     def test_down_enter_opens_rhythm(self):
@@ -55,10 +50,10 @@ class MenuKeys(HeadlessCase):
 
     def test_up_wraps_to_last_item(self):
         self.press("up")
-        self.assertEqual(self.screen.index, 4)
+        self.assertEqual(self.screen.index, 3)
 
     def test_down_wraps_to_first_item(self):
-        for _ in range(5):
+        for _ in range(4):
             self.press("down")
         self.assertEqual(self.screen.index, 0)
 
@@ -99,7 +94,7 @@ class MenuMouse(HeadlessCase):
         self.assertEqual(self.app.current_name, "menu")
 
     def test_click_ascii_button(self):
-        self.press("4")
+        self.press("3")
         self.click_label(ASCII_THEME.t("menu.freeplay"))
         self.assertEqual(self.app.current_name, "freeplay")
 
@@ -108,22 +103,22 @@ class ModeToggle(HeadlessCase):
     def test_toggle_switches_language_and_border(self):
         self.assertTrue(has_cjk(self.frame))
         self.assertIn("╭", self.frame)
-        self.press("4")
+        self.press("3")
         self.assertFalse(has_cjk(self.frame))
         self.assertIn("Free Play", self.frame)
         self.assertIn("+", self.frame)
         self.assertNotIn("╭", self.frame)
-        self.press("4")
+        self.press("3")
         self.assertTrue(has_cjk(self.frame))
 
     def test_toggle_is_persisted(self):
-        self.press("4")
+        self.press("3")
         self.assertEqual(self.read_config()["mode"], "ascii")
         self.assertEqual(Config.load().mode, "ascii")
 
     def test_theme_object_follows_mode(self):
         self.assertIs(self.app.theme, UNICODE_THEME)
-        self.press("4")
+        self.press("3")
         self.assertIs(self.app.theme, ASCII_THEME)
 
 
@@ -188,8 +183,7 @@ class Navigation(HeadlessCase):
 class AllScreensAtManySizes(unittest.TestCase):
     SIZES = [(80, 24), (120, 40), (46, 14), (40, 12), (30, 10), (20, 8), (12, 6), (6, 5), (5, 4)]
     SCREENS = [("menu", {}), ("freeplay", {}), ("song_select", {}), ("rhythm_list", {}),
-               ("rhythm_calib", {}), ("rhythm_keys", {}), ("rhythm_game", {"song": "canon"}),
-               ("sound_settings", {})]
+               ("rhythm_calib", {}), ("rhythm_keys", {}), ("rhythm_game", {"song": "canon"})]
 
     def setUp(self):
         self.config_file = isolated_config(self)

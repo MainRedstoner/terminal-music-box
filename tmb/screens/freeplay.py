@@ -4,7 +4,8 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 
 from ..ansi import Screen as Buffer, C, char_width, text_width
-from ..events import KeyEvent, MouseEvent, is_exit
+from ..config import LEN_RANGE, VOL_RANGE
+from ..events import KeyEvent, MouseEvent, is_exit, LEFT, RIGHT, UP, DOWN
 from ..ui import center_text, draw_box, draw_button
 from .. import songs
 from ..audio import synth
@@ -24,8 +25,12 @@ PRELOAD_MIDIS = sorted(set(KEY_MIDI.values()))
 
 REPEAT_TIMEOUT = 0.2   # auto-repeat debounce: legacy terminals have no key-up
 MAX_HOLD = 8.0         # safety cap on a held voice if a release event is lost
+STUCK_TIMEOUT = 2.0    # release events enabled but none arrived for this long
 ACTIVITY_WINDOW = 2.0
 NOTE_DUR = 1.0
+VOL_STEP = 0.1
+LEN_STEP = 0.25
+BAR_SLOTS = 8
 CAP_W = 5
 LABEL_W = 6
 
@@ -62,6 +67,7 @@ class FreePlayScreen(Screen):
         self.key_down: Dict[str, bool] = {}
         self.last_event: Dict[str, float] = {}
         self.key_voice: Dict[str, int] = {}
+        self.focus = 0  # 0 = volume, 1 = note length (sound strip)
         self._mouse_key: Optional[str] = None
 
     def enter(self, **kw) -> None:
@@ -97,6 +103,10 @@ class FreePlayScreen(Screen):
             self._toggle_prenatal()
         elif k == "ctrl+a":
             self._pick_song()
+        elif k in (UP, DOWN):
+            self.focus = 1 - self.focus  # toggle volume / length focus
+        elif k in (LEFT, RIGHT):
+            self._adjust(-1 if k == LEFT else 1)
         elif k in KEY_MIDI:
             self._press(k)
 
@@ -163,6 +173,26 @@ class FreePlayScreen(Screen):
             self.player.set_timbre(tid)
         self.audio.preload(tid, PRELOAD_MIDIS)  # no stall on the first press
 
+    # Sound strip -------------------------------------------------------------
+
+    def _max_len(self, tid: str) -> float:
+        # Ringing timbres cannot be extended past their natural buffer;
+        # sustained ones can be assembled up to 4x.
+        return LEN_RANGE[1] if synth.get_timbre(tid).sustain else 1.0
+
+    def _adjust(self, sign: int) -> None:
+        """Step the focused sound value of the current timbre."""
+        tid = self.config.timbre
+        vol, ln = self.config.sound_params(tid)
+        if self.focus == 0:
+            self.config.set_sound(tid, vol=vol + sign * VOL_STEP, ln=ln)
+        else:
+            ln = min(self._max_len(tid), max(LEN_RANGE[0], ln + sign * LEN_STEP))
+            self.config.set_sound(tid, vol=vol, ln=ln)
+        self.config.save()
+        if self.player is not None:  # keep the prenatal melody in sync
+            self.player.vol, self.player.length = self.config.sound_params(tid)
+
     def _toggle_prenatal(self) -> None:
         if self.player is None:
             self._start_player(self.config.prenatal_song)
@@ -193,9 +223,12 @@ class FreePlayScreen(Screen):
     def update(self, dt: float) -> None:
         self.clock += dt
         if self.app.release_events():
-            # Releases arrive as events; only a lost release needs the cap.
+            # Releases arrive as events. A held key keeps producing repeat
+            # events; if none arrive for STUCK_TIMEOUT the release was lost
+            # (e.g. a terminal that advertises event types but never sends
+            # them), so free the key instead of droning forever.
             for key, t0 in list(self.last_event.items()):
-                if self.clock - t0 > MAX_HOLD:
+                if self.clock - t0 > STUCK_TIMEOUT:
                     self._release(key)
         else:
             for key in list(self.key_down):
@@ -229,9 +262,10 @@ class FreePlayScreen(Screen):
             center_text(scr, y, text, fg, None, bold)
             y += 1
         reserve = 2 if (self.player is not None and ctrl_y - y >= 12) else 0
-        end = self._draw_keyboard(scr, y, ctrl_y - reserve)
+        end = self._draw_keyboard(scr, y, ctrl_y - reserve - 1)
         if self.player is not None and ctrl_y - 2 >= max(y, end):
             self._draw_progress(scr, ctrl_y - 2)
+        self._draw_sound_strip(scr, ctrl_y - 1)
         self._draw_controls(scr, ctrl_y, btn_h)
         center_text(scr, h - 2, th.t("freeplay.exit_hint"), C.dim)
 
@@ -342,6 +376,42 @@ class FreePlayScreen(Screen):
             draw_button(scr, x, y, bw, bh, _fit(lab, max(1, bw - 2)), th,
                         selected=sel, hits=self.hits, action=action)
             x += bw + gap
+
+    def _draw_sound_strip(self, scr: Buffer, y: int) -> None:
+        """Inline per-timbre volume / length editors for the current timbre."""
+        th = self.theme
+        w, h = scr.w, scr.h
+        if not (0 <= y < h) or w < 30:
+            return
+        tid = self.config.timbre
+        vol, ln = self.config.sound_params(tid)
+        uni = th.is_unicode
+        on, off = ("█", "░") if uni else ("#", "-")
+
+        def bar(value: float, lo: float, hi: float) -> str:
+            frac = (value - lo) / max(1e-9, hi - lo)
+            full = max(0, min(BAR_SLOTS, int(round(frac * BAR_SLOTS))))
+            return on * full + off * (BAR_SLOTS - full)
+
+        segs = [
+            (th.t("freeplay.vol"), bar(vol, *VOL_RANGE), "%.1f" % vol),
+            (th.t("freeplay.len"), bar(ln, LEN_RANGE[0], self._max_len(tid)),
+             "%.2f×" % ln),
+        ]
+        seg_w = 24
+        gap = 4
+        total = len(segs) * seg_w + (len(segs) - 1) * gap
+        x = max(0, (w - total) // 2)
+        for i, (label, bar_text, val) in enumerate(segs):
+            sel = self.focus == i
+            fg = C.black if sel else C.gray
+            bg = C.cyan if sel else None
+            line = "%s %s %s" % (label, bar_text, val)
+            if sel:
+                scr.fill(x, y, seg_w, 1, " ", fg, bg)
+            scr.text(x, y, line, fg, bg, sel)
+            self.hits.add(x, y, seg_w, 1, (lambda idx=i: setattr(self, "focus", idx)))
+            x += seg_w + gap
 
     def _draw_progress(self, scr: Buffer, y: int) -> None:
         p = self.player

@@ -95,6 +95,16 @@ class ConfigFile(unittest.TestCase):
         self.assertEqual(c.sound_params("harp"), (1.0, 1.0))
         self.assertEqual(c.sound_params("flute"), (1.0, 1.0))
 
+    def test_bit_defaults_to_a_short_note_length(self):
+        c = Config()
+        self.assertEqual(c.sound_params("bit"), (1.0, 0.25))
+        # a user override always wins over the built-in default
+        c.set_sound("bit", ln=1.0)
+        self.assertEqual(c.sound_params("bit"), (1.0, 1.0))
+        # removing the override restores it
+        c.sound.pop("bit")
+        self.assertEqual(c.sound_params("bit"), (1.0, 0.25))
+
     def test_sound_params_clamp_out_of_range_values(self):
         c = Config(sound={"harp": {"vol": 9.0, "len": 0.01},
                           "flute": {"vol": -3.0, "len": 99.0}})

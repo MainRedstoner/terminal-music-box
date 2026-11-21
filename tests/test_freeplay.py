@@ -6,7 +6,7 @@ import unittest
 from tmb import songs
 from tmb.audio import synth
 from tmb.events import KeyEvent
-from tmb.screens.freeplay import (ACTIVITY_WINDOW, KEY_MIDI, MAX_HOLD,
+from tmb.screens.freeplay import (ACTIVITY_WINDOW, KEY_MIDI, STUCK_TIMEOUT,
                                   REPEAT_TIMEOUT)
 
 try:
@@ -73,10 +73,10 @@ class FreePlay(HeadlessCase):
         self.assertEqual([loop for _, loop in voice._segments], [False])  # tail rings
         self.assertEqual(self.engine.active(), 1)
 
-    def test_a_lost_release_is_capped_by_max_hold(self):
+    def test_a_lost_release_frees_the_key_after_the_stuck_timeout(self):
         self.cfg.timbre = "bit"
         self.press("a")
-        self.advance(MAX_HOLD + 0.3, dt=0.1)
+        self.advance(STUCK_TIMEOUT + 0.3, dt=0.1)
         self.assertEqual(self.screen.key_down, {})
         self.assertEqual(self.screen.key_voice, {})
         voice = next(iter(self.engine._voices.values()))
@@ -318,6 +318,88 @@ class FreePlay(HeadlessCase):
     def test_mouse_click_on_back_button(self):
         self.click_label(self.app.theme.t("common.back"))
         self.assertEqual(self.app.current_name, "menu")
+
+
+class SoundStrip(HeadlessCase):
+    start_screen = "freeplay"
+    """Inline volume / length editors beside the keyboard."""
+
+    def setUp(self):
+        super().setUp()
+        th = self.app.theme
+        self.vol_label = th.t("freeplay.vol")
+        self.len_label = th.t("freeplay.len")
+
+    def test_strip_shows_both_values(self):
+        self.assertIn(self.vol_label, self.frame)
+        self.assertIn(self.len_label, self.frame)
+        self.assertIn("1.0", self.frame)
+        self.assertIn("1.00×", self.frame)
+
+    def test_up_down_toggle_the_focus(self):
+        self.press("down")
+        self.assertEqual(self.screen.focus, 1)
+        self.press("up")
+        self.assertEqual(self.screen.focus, 0)
+        self.press("up")
+        self.assertEqual(self.screen.focus, 1)
+
+    def test_left_right_adjust_the_focused_volume(self):
+        self.press("right")
+        self.assertEqual(self.cfg.sound_params("harp"), (1.1, 1.0))
+        self.press("left")
+        self.press("left")
+        self.assertEqual(self.cfg.sound_params("harp"), (0.9, 1.0))
+        self.assertEqual(self.read_config()["sound"]["harp"]["vol"], 0.9)
+
+    def test_left_right_adjust_length_when_focused(self):
+        self.press("down")  # focus the length row
+        self.press("left")  # harp (ringing) can only be trimmed
+        self.assertEqual(self.cfg.sound_params("harp"), (1.0, 0.75))
+        self.assertEqual(self.read_config()["sound"]["harp"]["len"], 0.75)
+        self.press("ctrl+x")
+        self.press("ctrl+x")  # harp -> bit -> flute (sustained)
+        self.press("right")
+        self.assertEqual(self.cfg.sound_params("flute"), (1.0, 1.25))
+
+    def test_ringing_timbre_length_is_capped_at_natural(self):
+        self.press("down")
+        for _ in range(6):
+            self.press("right")
+        self.assertEqual(self.cfg.sound_params("harp")[1], 1.0)
+
+    def test_sustained_timbre_length_grows_to_four(self):
+        self.cfg.timbre = "flute"
+        self.press("down")
+        for _ in range(20):
+            self.press("right")
+        self.assertEqual(self.cfg.sound_params("flute")[1], 4.0)
+
+    def test_bit_defaults_to_quarter_length(self):
+        self.cfg.timbre = "bit"
+        self.step()
+        self.assertIn("0.25×", self.frame)
+        self.assertEqual(self.cfg.sound_params("bit"), (1.0, 0.25))
+
+    def test_adjusted_settings_follow_a_timbre_switch(self):
+        self.press("right")
+        self.assertEqual(self.cfg.sound_params("harp"), (1.1, 1.0))
+        self.press("ctrl+x")  # -> bit, with its 0.25x default
+        self.assertEqual(self.cfg.sound_params("bit"), (1.0, 0.25))
+        self.assertIn("0.25×", self.frame)
+
+    def test_prenatal_melody_picks_up_live_adjustments(self):
+        self.press("ctrl+t")
+        self.assertEqual(self.screen.player.vol, 1.0)
+        self.press("right")
+        self.assertEqual(self.screen.player.vol, 1.1)
+        self.assertEqual(self.screen.player.length, 1.0)
+
+    def test_mouse_click_focuses_a_row(self):
+        self.click_label(self.len_label)
+        self.assertEqual(self.screen.focus, 1)
+        self.press("left")
+        self.assertEqual(self.cfg.sound_params("harp")[1], 0.75)
 
 
 class FreePlayAscii(HeadlessCase):

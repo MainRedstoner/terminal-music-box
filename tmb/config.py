@@ -9,6 +9,8 @@ from typing import Dict, List, Optional, Tuple
 DEFAULT_KEYS = ["a", "s", "d", "j", "k", "l"]
 VOL_RANGE = (0.0, 2.0)     # per-timbre volume multiplier
 LEN_RANGE = (0.25, 4.0)    # per-timbre note-length multiplier (1.0 = natural)
+# Timbres whose natural default differs from 1.0x / full volume.
+DEFAULT_SOUND = {"bit": {"vol": 1.0, "len": 0.25}}
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -45,7 +47,9 @@ class Config:
     sound: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
     def sound_params(self, tid: str) -> Tuple[float, float]:
-        d = self.sound.get(tid) or {}
+        d = self.sound.get(tid)
+        if d is None:
+            d = DEFAULT_SOUND.get(tid, {})
         vol = _clamp(_num(d.get("vol"), 1.0), *VOL_RANGE)
         ln = _clamp(_num(d.get("len"), 1.0), *LEN_RANGE)
         return vol, ln
