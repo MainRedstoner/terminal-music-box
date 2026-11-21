@@ -93,5 +93,27 @@ def center_text(screen: Screen, y: int, text: str, fg=None, bg=None, bold=False)
     screen.text(x, y, text, fg, bg, bold)
 
 
+def draw_loading_overlay(screen: Screen, theme: Theme, done: int,
+                         total: int) -> None:
+    """Draw a centered progress popup while audio buffers are rendering."""
+    w, h = screen.w, screen.h
+    if w < 14 or h < 7:
+        return
+    bw = min(w - 4, 36)
+    bh = 5
+    x = (w - bw) // 2
+    y = (h - bh) // 2
+    draw_box(screen, x, y, bw, bh, theme, fg=C.cyan,
+             title=theme.t("loading.title"), title_fg=C.yellow)
+    ratio = done / total if total else 1.0
+    center_text(screen, y + 1, "%d%%" % round(ratio * 100), C.white, None, True)
+    barw = max(4, bw - 6)
+    nfill = int(barw * ratio)
+    fill, empty = ("█", "░") if theme.is_unicode else ("#", "-")
+    bx = x + (bw - barw) // 2
+    screen.text(bx, y + 3, fill * nfill, C.cyan)
+    screen.text(bx + nfill, y + 3, empty * (barw - nfill), C.dim)
+
+
 def clamp(v: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, v))

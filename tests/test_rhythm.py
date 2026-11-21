@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 from tmb import songs
 from tmb.config import Config
@@ -249,6 +250,32 @@ class KeyConfig(HeadlessCase):
         self.press("enter")
         self.assertEqual(self.app.current_name, "rhythm_game")
         self.assertEqual(self.screen.lane_keys[0], "z")
+
+
+class RhythmPreloadGate(HeadlessCase):
+    """A song opens only after its audio buffers are ready."""
+
+    start_screen = "rhythm_menu"
+
+    def setUp(self):
+        super().setUp()
+        self.engine.realtime = True
+        self.engine.preload = mock.Mock()
+        self.engine.is_preloaded = mock.Mock(return_value=False)
+
+    def test_enter_waits_for_the_song_to_preload(self):
+        self.press("enter")
+        self.assertEqual(self.app.current_name, "rhythm_menu")
+        self.engine.preload.assert_called_once()
+        self.assertIsNotNone(self.screen._pending_song)
+
+    def test_enters_automatically_when_the_preload_finishes(self):
+        self.press("enter")
+        self.assertEqual(self.app.current_name, "rhythm_menu")
+        self.engine.is_preloaded.return_value = True
+        self.step()
+        self.assertEqual(self.app.current_name, "rhythm_game")
+        self.assertEqual(self.screen.song_id, "canon")
 
 
 if __name__ == "__main__":

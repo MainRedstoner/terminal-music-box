@@ -162,6 +162,9 @@ class AudioEngine:
         self._cache_lock = threading.Lock()
         self._preload_lock = threading.Lock()
         self._preload_gen = 0
+        self._preload_tid: Optional[str] = None
+        self._preload_total = 0
+        self._preload_done = 0
         self._thread: Optional[threading.Thread] = None
         self._running = False
         self._samples = 0
@@ -292,7 +295,11 @@ class AudioEngine:
         with self._preload_lock:
             self._preload_gen += 1
             gen = self._preload_gen
-            todo = [m for m in midis if (tid, m) not in self._cache]
+            with self._cache_lock:
+                todo = [m for m in midis if (tid, m) not in self._cache]
+            self._preload_tid = tid if todo else None
+            self._preload_total = len(todo)
+            self._preload_done = 0
         if not todo:
             return
         threading.Thread(target=self._preload_work, args=(tid, todo, gen),
@@ -304,6 +311,27 @@ class AudioEngine:
                 if gen != self._preload_gen:
                     return  # superseded by a newer preload request
             self._buffers(tid, m)
+            with self._preload_lock:
+                if gen == self._preload_gen:
+                    self._preload_done += 1
+        with self._preload_lock:
+            if gen == self._preload_gen:
+                self._preload_tid = None
+
+    def preload_status(self) -> Tuple[bool, int, int]:
+        """Return (active, rendered, total) for the latest preload request.
+
+        active is False once the worker has rendered every requested key
+        (or when everything was already cached and no work was started).
+        """
+        with self._preload_lock:
+            return (self._preload_tid is not None,
+                    self._preload_done, self._preload_total)
+
+    def is_preloaded(self, tid: str, midis) -> bool:
+        """True when every (tid, midi) buffer is already cached."""
+        with self._cache_lock:
+            return all((tid, m) in self._cache for m in midis)
 
     def note_on(self, tid: str, midi: int, vel: float = 1.0) -> int:
         nb = self._buffers(tid, midi)

@@ -189,6 +189,15 @@ class Preload(unittest.TestCase):
             time.sleep(0.01)
         return False
 
+    def _wait_idle(self, timeout=10.0):
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            active, done, total = self.eng.preload_status()
+            if not active:
+                return done, total
+            time.sleep(0.01)
+        self.fail("preload did not finish")
+
     def test_preload_fills_the_cache_in_a_background_thread(self):
         self.assertEqual(self.eng._cache, {})
         self.eng.preload("bit", (60, 62, 64))
@@ -217,6 +226,19 @@ class Preload(unittest.TestCase):
         time.sleep(0.6)  # grace: at most one in-flight harp render may land
         harp = sum(1 for tid, _ in self.eng._cache if tid == "harp")
         self.assertLess(harp, 4)
+
+    def test_preload_status_reports_progress_until_the_worker_finishes(self):
+        self.eng.preload("bit", (60, 62))
+        done, total = self._wait_idle()
+        self.assertEqual((done, total), (2, 2))
+        self.assertTrue(self.eng.is_preloaded("bit", (60, 62)))
+
+    def test_is_preloaded_requires_every_requested_key(self):
+        self.eng._buffers("bit", 60)
+        self.assertFalse(self.eng.is_preloaded("bit", (60, 62)))
+        self.eng.preload("bit", (62,))
+        self.assertTrue(self._wait_cache(("bit", 62)))
+        self.assertTrue(self.eng.is_preloaded("bit", (60, 62)))
 
 
 class AdaptiveMix(unittest.TestCase):

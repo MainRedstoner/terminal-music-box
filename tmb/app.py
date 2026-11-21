@@ -7,6 +7,7 @@ from typing import Callable, Dict, Optional
 from .config import Config
 from .events import KeyEvent, MouseEvent, ResizeEvent
 from .theme import theme_for
+from .ui import draw_loading_overlay
 from .audio.engine import AudioEngine
 
 
@@ -95,7 +96,17 @@ class App:
         scr.clear()
         if self.current is not None:
             self.current.draw(scr)
+        self._draw_loading(scr)
         self.terminal.render(scr)
+
+    def _draw_loading(self, scr) -> None:
+        # Offline/headless runs have no playback thread to stall, and their
+        # frames are consumed by tests or --demo, so no popup is needed.
+        if not self.audio.realtime:
+            return
+        active, done, total = self.audio.preload_status()
+        if active:
+            draw_loading_overlay(scr, self.theme, done, total)
 
     def run(self) -> None:
         self.audio.start()

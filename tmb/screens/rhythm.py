@@ -20,6 +20,7 @@ class RhythmMenuScreen(Screen):
         self.function_index = 0
         self.song_ids = list(songs.RHYTHM_ORDER)
         self.function_ids = ["rhythm_calib", "rhythm_keys"]
+        self._pending_song = None
 
     def _move(self, step: int) -> None:
         if self.focus == 0:
@@ -33,12 +34,44 @@ class RhythmMenuScreen(Screen):
     def _start_song(self, index: int) -> None:
         self.focus = 0
         self.song_index = index
-        if self.song_ids:
-            self.app.navigate("rhythm_game", song=self.song_ids[index])
+        if not self.song_ids:
+            return
+        sid = self.song_ids[index]
+        if self._song_ready(sid):
+            self._pending_song = None
+            self.app.navigate("rhythm_game", song=sid)
+            return
+        self._pending_song = sid
+        timbre, midis = self._song_audio(sid)
+        self.audio.preload(timbre, midis)
+
+    def _song_audio(self, sid: str):
+        song = songs.SONGS[sid]
+        timbre = song.timbre or self.config.timbre
+        midis = sorted({n.midi for n in song.notes})
+        return timbre, midis
+
+    def _song_ready(self, sid: str) -> bool:
+        # Headless/offline runs have no playback thread to stall, so they can
+        # start immediately; the gate is for real audio.
+        if not self.audio.realtime:
+            return True
+        timbre, midis = self._song_audio(sid)
+        return self.audio.is_preloaded(timbre, midis)
+
+    def update(self, dt: float) -> None:
+        sid = self._pending_song
+        if sid is not None and self._song_ready(sid):
+            self._pending_song = None
+            self.app.navigate("rhythm_game", song=sid)
+
+    def exit(self) -> None:
+        self._pending_song = None
 
     def _start_function(self, index: int) -> None:
         self.focus = 1
         self.function_index = index
+        self._pending_song = None
         self.app.navigate(self.function_ids[index])
 
     def _activate(self) -> None:

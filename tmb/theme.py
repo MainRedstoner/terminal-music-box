@@ -121,6 +121,7 @@ ZH: Dict[str, str] = {
     "rhythm.new_record": "新纪录！",
     "rhythm.press_any": "按任意键开始采样",
     "prenatal.title": "胎教模式",
+    "loading.title": "加载中",
 }
 
 EN: Dict[str, str] = {
@@ -205,6 +206,7 @@ EN: Dict[str, str] = {
     "rhythm.new_record": "New record!",
     "rhythm.press_any": "Press any key to begin sampling",
     "prenatal.title": "Prenatal Mode",
+    "loading.title": "Loading",
 }
 
 UNICODE_THEME = Theme("zh", ROUNDED, ZH)

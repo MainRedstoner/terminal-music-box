@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 from tmb.app import App
 from tmb.audio.backends import NullBackend
@@ -239,6 +240,23 @@ class AllScreensAtManySizes(unittest.TestCase):
                         term.key("esc")
                         app.step(0.016)
                     self.assertEqual(len(term.last.split("\n")), h)
+
+
+class LoadingOverlay(HeadlessCase):
+    def setUp(self):
+        super().setUp()
+        self.engine.realtime = True
+
+    def test_progress_popup_is_drawn_while_preloading(self):
+        self.engine.preload_status = mock.Mock(return_value=(True, 3, 10))
+        self.step()
+        self.assertIn("加载中", self.frame)
+        self.assertIn("30%", self.frame)
+
+    def test_progress_popup_hides_when_preloading_finishes(self):
+        self.engine.preload_status = mock.Mock(return_value=(False, 10, 10))
+        self.step()
+        self.assertNotIn("加载中", self.frame)
 
 
 if __name__ == "__main__":
