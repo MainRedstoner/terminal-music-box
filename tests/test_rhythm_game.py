@@ -368,6 +368,10 @@ class PauseAndResult(Game):
 class Minuet(Game):
     song = "minuet_g"
 
+    def test_the_timbre_is_locked_to_the_electric_piano(self):
+        self.assertEqual(self.game.timbre, "pling")
+        self.assertEqual(self.game.player.timbre, "pling")
+
     def test_downbeat_plays_the_full_score_and_accepts_the_double_hit(self):
         self.start_play()
         g = self.game

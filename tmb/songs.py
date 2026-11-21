@@ -801,7 +801,7 @@ for _start, _accents in ((0.0, _MINUET_ACCENTS_A), (48.0, _MINUET_ACCENTS_A),
         _minuet_chart.append(Note(_time, _midi, _minuet_spb * 0.9))
 _minuet_chart.sort(key=lambda n: n.time)
 register(Song("minuet_g", "G 大调小步舞曲", "Minuet in G", _MINUET_BPM,
-              _minuet_notes, chart_notes=_minuet_chart))
+              _minuet_notes, chart_notes=_minuet_chart, timbre="pling"))
 
 
 # 土耳其进行曲 / Turkish March — the complete Rondo alla Turca from Mozart's

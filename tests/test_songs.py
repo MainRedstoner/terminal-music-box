@@ -74,13 +74,14 @@ class Library(unittest.TestCase):
                          [81, 88, 81, 81, 81])
 
     def test_rhythm_songs_lock_their_timbres(self):
-        # Canon sounds on the didgeridoo, Turkish March on the electric piano;
-        # every other song follows the user's timbre.
+        # Canon sounds on the didgeridoo; Turkish March and Minuet in G on the
+        # electric piano. Every other song follows the user's timbre.
         self.assertEqual(songs.SONGS["canon"].timbre, "didgeridoo")
         self.assertEqual(songs.SONGS["turkish_march"].timbre, "pling")
+        self.assertEqual(songs.SONGS["minuet_g"].timbre, "pling")
         self.assertEqual({sid for sid in songs.ORDER
                           if songs.SONGS[sid].timbre is not None},
-                         {"canon", "turkish_march"})
+                         {"canon", "minuet_g", "turkish_march"})
 
     def test_canon_is_the_complete_four_part_score(self):
         song = songs.SONGS["canon"]

@@ -93,8 +93,8 @@ Twinkle Twinkle). Songs loop.
 ### Rhythm Game
 - The melody auto-plays for the whole run — each note sounds exactly as it
   crosses the judgment line. Your taps are silent judgment only.
-- Canon's timbre is locked to the didgeridoo and Turkish March's to the
-  electric piano, regardless of the free-play timbre selection.
+- Canon's timbre is locked to the didgeridoo; Turkish March and Minuet in G
+  use the electric piano, regardless of the free-play timbre selection.
 - Turkish March is the complete rondo
   (A-B-A'-C-D-E-C-A-B-A'-transition-coda); its chart follows the right-hand
   theme. Dense passages stay on the four inner lanes and alternate between
