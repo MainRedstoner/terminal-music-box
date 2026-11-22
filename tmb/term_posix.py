@@ -245,7 +245,7 @@ class PosixBackend:
     name = "posix"
     release_events = False  # set True when the kitty protocol is negotiated
 
-    def __init__(self):
+    def __init__(self, no_kitty=False):
         import termios
         import tty
         self._termios = termios
@@ -255,6 +255,7 @@ class PosixBackend:
         self._parser = _Parser()
         self._resized = False
         self._old_handler = None
+        self._no_kitty = no_kitty  # --no-kitty: test the legacy-key paths
         self._kitty = False
         self._diag_log = None
         path = os.environ.get("TMB_LOG_INPUT")
@@ -277,7 +278,7 @@ class PosixBackend:
         cc[termios.VMIN] = 0
         cc[termios.VTIME] = 0
         termios.tcsetattr(self._fd, termios.TCSANOW, [iflag, oflag, cflag, lflag, ispeed, ospeed, cc])
-        self._kitty = self._negotiate_kitty()
+        self._kitty = not self._no_kitty and self._negotiate_kitty()
         self.release_events = self._kitty
         # WSL/ConPTY drops kitty releases while on the alternate screen; there
         # we skip it so key-up events (needed for sustained timbres) keep

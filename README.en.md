@@ -44,6 +44,7 @@ python main.py --mode ascii        # start in ASCII mode
 python main.py --audio alsa        # force a backend: alsa|pulse|winmm|null|wav
 python main.py --wav out.wav       # render audio to a file instead of a device
 python main.py --demo              # headless scripted demo (no terminal needed)
+python main.py --no-kitty          # testing: skip the kitty keyboard protocol
 ```
 
 Settings (UI mode, timbre, rhythm keys, latency offset, prenatal song,

@@ -39,6 +39,7 @@ python main.py --mode ascii        # 以 ASCII 模式启动
 python main.py --audio alsa        # 强制指定后端:alsa|pulse|winmm|null|wav
 python main.py --wav out.wav       # 不发声,把音频渲染到 WAV 文件
 python main.py --demo              # 无头脚本演示(不需要交互终端)
+python main.py --no-kitty          # 测试用:禁用 Kitty 键盘协议
 ```
 
 设置(界面模式、音色、音游键位、延迟偏移、胎教曲目、声音设置)自动保存到:

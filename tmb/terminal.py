@@ -23,17 +23,17 @@ _MOUSE_ON = "\x1b[?1000h\x1b[?1002h\x1b[?1006h"
 _MOUSE_OFF = "\x1b[?1006l\x1b[?1002l\x1b[?1000l"
 
 
-def make_backend():
+def make_backend(no_kitty=False):
     if os.name == "nt":
         from .term_win import WindowsBackend
-        return WindowsBackend()
+        return WindowsBackend()  # win32 console API: no kitty protocol involved
     from .term_posix import PosixBackend
-    return PosixBackend()
+    return PosixBackend(no_kitty=no_kitty)
 
 
 class Terminal:
-    def __init__(self, backend=None):
-        self.backend = backend if backend is not None else make_backend()
+    def __init__(self, backend=None, no_kitty=False):
+        self.backend = backend if backend is not None else make_backend(no_kitty)
         self.screen: Optional[Screen] = None
         self._buf: List[str] = []
         self._alt = False

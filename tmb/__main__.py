@@ -98,6 +98,8 @@ def main(argv=None) -> int:
                    default="auto", help="audio backend")
     p.add_argument("--wav", metavar="PATH", help="render audio to a WAV file")
     p.add_argument("--demo", action="store_true", help="run a headless scripted demo")
+    p.add_argument("--no-kitty", action="store_true",
+                   help="skip kitty keyboard protocol negotiation (testing)")
     args = p.parse_args(argv)
 
     if args.demo:
@@ -109,7 +111,7 @@ def main(argv=None) -> int:
         cfg.mode = args.mode
     prefer = None if args.audio == "auto" else args.audio
     from .terminal import Terminal
-    term = Terminal()
+    term = Terminal(no_kitty=args.no_kitty)
     app = make_app(term, prefer, args.wav, cfg)
     if not sys.stdout.isatty():
         sys.stderr.write("tmb needs an interactive terminal (try --demo for headless).\n")

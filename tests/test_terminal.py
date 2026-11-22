@@ -132,10 +132,16 @@ class Dispatch(unittest.TestCase):
             with mock.patch("tmb.term_posix.PosixBackend") as cls:
                 self.assertIs(make_backend(), cls.return_value)
 
+    def test_make_backend_passes_no_kitty_to_posix(self):
+        with mock.patch("tmb.terminal.os.name", "posix"):
+            with mock.patch("tmb.term_posix.PosixBackend") as cls:
+                make_backend(no_kitty=True)
+                cls.assert_called_once_with(no_kitty=True)
+
     def test_terminal_defaults_to_the_platform_backend(self):
         with mock.patch("tmb.terminal.make_backend") as mk:
             Terminal()
-            mk.assert_called_once_with()
+            mk.assert_called_once_with(False)
 
 
 if __name__ == "__main__":
