@@ -2,11 +2,11 @@
  "format": 1,
  "id": "i_never_forgot",
  "title_zh": "我不曾忘记",
- "title_en": "To the Traveler",
- "artist": "HOYO-MiX",
+ "title_en": "I Have Never Forgotten",
+ "artist": "ChiliChill",
  "audio": "audio.bin",
  "duration": 255.082,
- "offset": 0.0,
- "lead_in": 2.0,
+ "offset": 0,
+ "lead_in": 2,
  "difficulty": "Normal"
 }

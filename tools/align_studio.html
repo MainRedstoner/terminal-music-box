@@ -1,0 +1,2080 @@
+<!doctype html>
+<!-- 终端音乐盒 · 对齐台：专门用来把手按谱面吸附到网格、微调整体偏移的
+     单文件零依赖网页。音频经 WebAudio 播放，网格节拍与音符点击都由
+     WebAudio 调度，页面卡顿不会影响听感。导出 chart.json 后仍用
+     tools/make_pack.py --src 打包。 -->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>终端音乐盒 · 对齐台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d1420'/%3E%3Cpath d='M7 11h18M7 16h18M7 21h11' stroke='%234cc9ff' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #080b11;
+    --panel: #111722;
+    --panel-2: #151d2b;
+    --panel-3: #1b2537;
+    --line: #222e42;
+    --line-soft: #192334;
+    --text: #e7edf8;
+    --text-2: #b9c5da;
+    --dim: #7d8aa4;
+    --faint: #5a6780;
+    --accent: #4cc9ff;
+    --accent-ink: #04121c;
+    --target: #ffcf5c;
+    --danger: #ff6b7d;
+    --ok: #5ce0a0;
+    --mono: "Cascadia Mono", "JetBrains Mono", Consolas, ui-monospace, monospace;
+    --sans: "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background:
+      radial-gradient(1000px 500px at 10% -10%, rgba(76, 201, 255, .08), transparent 62%),
+      radial-gradient(900px 450px at 108% 4%, rgba(139, 157, 255, .07), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font: 13px/1.5 var(--sans);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    user-select: none;
+    -webkit-font-smoothing: antialiased;
+  }
+  input, textarea, dialog { user-select: text; }
+  button, .btn, select, input { font: inherit; color: inherit; }
+  button, .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: 31px; padding: 0 11px;
+    background: var(--panel-2); color: var(--text-2);
+    border: 1px solid var(--line); border-radius: 8px;
+    cursor: pointer; white-space: nowrap;
+    transition: background .14s ease, border-color .14s ease, color .14s ease, transform .08s ease;
+  }
+  .btn { user-select: none; }
+  button:hover, .btn:hover { background: var(--panel-3); color: var(--text); border-color: #2d3b53; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .36; cursor: default; pointer-events: none; }
+  button.primary {
+    background: linear-gradient(180deg, #62d2ff, #35b4ea);
+    color: var(--accent-ink); border-color: transparent; font-weight: 600;
+    box-shadow: 0 5px 18px rgba(76, 201, 255, .2);
+  }
+  button.primary:hover { background: linear-gradient(180deg, #7adaff, #45bff2); color: var(--accent-ink); }
+  button.danger { color: var(--danger); }
+  button.icon { width: 31px; padding: 0; }
+  .i { width: 16px; height: 16px; display: block; flex: none; }
+  .grow { flex: 1 1 auto; min-width: 0; }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .topbar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    min-height: 56px; padding: 8px 13px;
+    background: linear-gradient(180deg, rgba(17, 23, 34, .94), rgba(13, 18, 27, .9));
+    border-bottom: 1px solid var(--line);
+    backdrop-filter: blur(8px);
+    z-index: 20;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; margin-right: 3px; }
+  .logo {
+    width: 33px; height: 33px; border-radius: 10px;
+    background: linear-gradient(135deg, #62d2ff, #8b9dff);
+    color: #05121b; display: grid; place-items: center;
+    font: 700 18px/1 var(--sans);
+    box-shadow: 0 6px 18px rgba(76, 201, 255, .25), inset 0 1px 0 rgba(255,255,255,.4);
+  }
+  .brand-text { display: flex; flex-direction: column; line-height: 1.1; }
+  .brand-text strong { font-size: 14px; font-weight: 650; letter-spacing: .02em; }
+  .brand-text span {
+    font: 600 8px/1 var(--mono); letter-spacing: .22em;
+    color: var(--faint); text-transform: uppercase; margin-top: 4px;
+  }
+  .divider { width: 1px; height: 23px; background: var(--line); margin: 0 4px; }
+  .file-info {
+    color: var(--dim); font: 11px/1 var(--mono);
+    max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    padding: 0 5px;
+  }
+  .file-info.ok { color: var(--text-2); }
+  .topbar .btn-label { display: inline; }
+
+  .stage {
+    flex: 1 1 auto; min-height: 0;
+    display: grid; grid-template-columns: minmax(0, 1fr) 322px;
+    gap: 12px; padding: 12px 12px 0;
+  }
+  .canvas-card {
+    position: relative; min-width: 0; min-height: 0;
+    background: #0b0f16; border: 1px solid var(--line); border-radius: 15px;
+    overflow: hidden;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, .36), inset 0 1px 0 rgba(255,255,255,.025);
+  }
+  #view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+  .empty {
+    position: absolute; inset: 0; z-index: 3; display: grid; place-items: center;
+    padding: 24px; text-align: center;
+    background:
+      radial-gradient(560px 300px at 50% 38%, rgba(76, 201, 255, .08), transparent 72%),
+      rgba(11, 15, 22, .52);
+  }
+  .empty .badge {
+    width: 64px; height: 64px; margin: 0 auto 16px; border-radius: 20px;
+    display: grid; place-items: center;
+    background: linear-gradient(140deg, rgba(76, 201, 255, .18), rgba(139, 157, 255, .1));
+    border: 1px solid rgba(76, 201, 255, .3);
+    color: var(--accent); font-size: 31px;
+    box-shadow: 0 18px 50px rgba(76, 201, 255, .14), inset 0 1px 0 rgba(255,255,255,.14);
+  }
+  .empty h2 { margin: 0 0 6px; font-size: 18px; font-weight: 600; }
+  .empty p { margin: 0; color: var(--dim); font-size: 12px; line-height: 1.8; }
+  .empty .row { margin-top: 18px; justify-content: center; }
+  .empty .hint { margin-top: 14px; color: var(--faint); font-size: 10.5px; }
+  .empty code {
+    font: 10.5px/1.5 var(--mono); color: #9fd8f5;
+    background: #0b131d; border: 1px solid #1d2a3c; border-radius: 4px; padding: 1px 5px;
+  }
+  .busy {
+    position: absolute; inset: 0; z-index: 6; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px;
+    background: rgba(7, 10, 16, .72); backdrop-filter: blur(3px);
+    color: var(--text-2); font-size: 12.5px;
+  }
+  .spinner {
+    width: 28px; height: 28px; border-radius: 50%;
+    border: 2px solid rgba(76, 201, 255, .18); border-top-color: var(--accent);
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .drag-over {
+    position: absolute; inset: 8px; z-index: 7; display: none; place-items: center;
+    border: 2px dashed rgba(76, 201, 255, .55); border-radius: 12px;
+    background: rgba(7, 12, 19, .84); color: var(--accent); font-size: 14px;
+  }
+  body.dragging .drag-over { display: grid; }
+  .tip {
+    position: fixed; z-index: 90; pointer-events: none;
+    transform: translate(-50%, -100%);
+    background: #080d15; border: 1px solid #2b3a52; border-radius: 7px;
+    padding: 4px 8px; font: 11px/1.4 var(--mono); color: var(--text);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .5); white-space: nowrap;
+  }
+  .tip.below { transform: translate(-50%, 14px); }
+
+  .sidebar {
+    display: flex; flex-direction: column; gap: 9px;
+    min-height: 0; overflow-y: auto; padding-right: 2px;
+    scrollbar-width: thin; scrollbar-color: #2a374d transparent;
+  }
+  body.sidebar-hidden .sidebar { display: none; }
+  body.sidebar-hidden .stage { grid-template-columns: minmax(0, 1fr); }
+  .sidebar::-webkit-scrollbar { width: 8px; }
+  .sidebar::-webkit-scrollbar-thumb { background: #243149; border-radius: 4px; }
+  .card {
+    background: linear-gradient(180deg, var(--panel), #0f151f);
+    border: 1px solid var(--line); border-radius: 13px;
+    padding: 12px 13px;
+  }
+  .card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+  .card-head h2 {
+    margin: 0; font-size: 10px; font-weight: 650; letter-spacing: .16em;
+    color: var(--faint); text-transform: uppercase;
+  }
+  .chip {
+    margin-left: auto; font: 600 9.5px/1 var(--mono); letter-spacing: .03em;
+    color: var(--accent); background: rgba(76, 201, 255, .1);
+    border: 1px solid rgba(76, 201, 255, .24); border-radius: 5px; padding: 3px 5px;
+  }
+  .chip.warn { color: var(--target); background: rgba(255, 207, 92, .1); border-color: rgba(255, 207, 92, .28); }
+  .field { display: grid; grid-template-columns: 58px 1fr auto; gap: 7px; align-items: center; margin-top: 8px; }
+  .field > label { color: var(--dim); font-size: 11px; }
+  .field .unit { color: var(--faint); font: 10px/1 var(--mono); }
+  input[type=number], select {
+    height: 29px; padding: 0 8px; min-width: 0;
+    background: #0a1018; color: var(--text);
+    border: 1px solid var(--line); border-radius: 7px; outline: none;
+  }
+  input[type=number] { font-family: var(--mono); font-size: 11.5px; width: 100%; }
+  select { cursor: pointer; font-size: 11.5px; }
+  input:focus, select:focus { border-color: rgba(76, 201, 255, .55); box-shadow: 0 0 0 3px rgba(76, 201, 255, .1); }
+  input[type=range] {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 4px; margin: 8px 0 2px; border-radius: 2px;
+    background: #263247; outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%;
+    background: var(--accent); border: 2px solid #0a0f17;
+    box-shadow: 0 0 0 1px rgba(76, 201, 255, .45); cursor: pointer;
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 10px; height: 10px; border-radius: 50%; background: var(--accent);
+    border: 2px solid #0a0f17; cursor: pointer;
+  }
+  .presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 7px; }
+  .presets button { height: 26px; padding: 0 4px; font: 500 10px/1 var(--mono); color: var(--dim); }
+  .presets button.on { color: var(--accent); border-color: rgba(76, 201, 255, .4); background: rgba(76, 201, 255, .08); }
+  .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .row.end { justify-content: flex-end; }
+  .row.tight { margin-top: 6px; }
+  .nudge-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 5px; }
+  .nudge-row button { height: 25px; padding: 0; font: 500 10px/1 var(--mono); }
+  .hint { color: var(--faint); font-size: 10.5px; line-height: 1.7; margin: 8px 0 0; }
+  .hint.warn { color: var(--target); }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 10px; margin: 10px 0 9px; padding: 9px 0; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+  .stats div { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .stats span { color: var(--faint); font-size: 9px; letter-spacing: .06em; }
+  .stats b { font: 600 10.5px/1.4 var(--mono); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-lines { display: flex; flex-direction: column; gap: 5px; margin-bottom: 9px; }
+  .file-lines div { display: grid; grid-template-columns: 34px 1fr; gap: 7px; align-items: baseline; }
+  .file-lines span { color: var(--faint); font-size: 9.5px; }
+  .file-lines b { color: var(--text-2); font: 500 10.5px/1.4 var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .toggle { height: 29px; font-size: 11px; color: var(--dim); }
+  .toggle::before {
+    content: ""; width: 6px; height: 6px; border-radius: 50%;
+    background: #38455c; transition: background .15s ease, box-shadow .15s ease;
+  }
+  .toggle.on { color: var(--text); border-color: #2a3d54; background: #142133; }
+  .toggle.on::before { background: var(--accent); box-shadow: 0 0 8px rgba(76, 201, 255, .85); }
+
+  .transport {
+    flex: none; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 9px 14px; min-height: 58px;
+    background: linear-gradient(180deg, rgba(16, 22, 32, .96), rgba(10, 15, 23, .98));
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -14px 36px rgba(0, 0, 0, .24);
+    z-index: 15;
+  }
+  .play {
+    width: 39px; height: 39px; padding: 0; border-radius: 50%; flex: none;
+    background: linear-gradient(180deg, #62d2ff, #2faadd);
+    color: #041018; border: 0;
+    box-shadow: 0 7px 20px rgba(76, 201, 255, .28), inset 0 1px 0 rgba(255,255,255,.4);
+  }
+  .play:hover { background: linear-gradient(180deg, #83ddff, #43bdf0); color: #041018; }
+  .play .i { width: 17px; height: 17px; }
+  .play .i-pause { display: none; }
+  .play.playing .i-play { display: none; }
+  .play.playing .i-pause { display: block; }
+  .timebox { width: 100px; flex: none; line-height: 1.12; }
+  #timeNow { font: 600 15px/1.25 var(--mono); color: var(--text); font-variant-numeric: tabular-nums; }
+  #timeTotal { font: 500 10px/1.3 var(--mono); color: var(--faint); }
+  .transport label { color: var(--faint); font-size: 10px; }
+  .transport select { width: 64px; padding: 0 5px; height: 28px; font: 11px var(--mono); }
+  .transport input[type=range] { width: 74px; margin: 0; }
+  #status { flex: 1 1 240px; min-width: 100px; text-align: right; color: var(--faint); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .zoom { display: inline-flex; gap: 3px; }
+  .zoom button { width: 28px; height: 28px; padding: 0; font-size: 14px; }
+
+  dialog {
+    width: min(620px, calc(100vw - 36px)); max-height: 88vh;
+    padding: 0; margin: auto; color: var(--text);
+    background: linear-gradient(180deg, #121925, #0e141e);
+    border: 1px solid #293850; border-radius: 15px;
+    box-shadow: 0 30px 90px rgba(0, 0, 0, .65);
+    user-select: text;
+  }
+  dialog::backdrop { background: rgba(3, 6, 10, .68); backdrop-filter: blur(3px); }
+  .dlg-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px 11px; border-bottom: 1px solid var(--line-soft); }
+  .dlg-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
+  .dlg-head .icon { margin-left: auto; }
+  .dlg-body { padding: 15px 18px; overflow-y: auto; max-height: calc(88vh - 110px); }
+  .dlg-body h3 { margin: 0 0 6px; font-size: 10px; letter-spacing: .16em; color: var(--faint); text-transform: uppercase; }
+  .dlg-body p { margin: 0 0 9px; color: var(--dim); font-size: 11.5px; line-height: 1.8; }
+  .dlg-body code { font: 11px/1.5 var(--mono); color: #9fd8f5; background: #0b131d; border: 1px solid #1d2a3c; border-radius: 4px; padding: 1px 5px; }
+  .dlg-body kbd { font: 500 10px/1 var(--mono); color: var(--text-2); background: #0b111a; border: 1px solid var(--line); border-bottom-color: #2b3a50; border-radius: 4px; padding: 3px 5px; }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; align-items: baseline; }
+  .keys span { color: var(--dim); font-size: 11px; }
+  .dlg-foot { display: flex; justify-content: flex-end; padding: 12px 18px; border-top: 1px solid var(--line-soft); }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 82px; z-index: 100;
+    transform: translate(-50%, 8px);
+    max-width: min(640px, 84vw);
+    padding: 8px 14px; border-radius: 8px;
+    background: #0d1520; border: 1px solid #2a3b54; color: var(--text-2);
+    font-size: 12px; line-height: 1.6;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, .5);
+    opacity: 0; visibility: hidden;
+    transition: opacity .16s ease, transform .16s ease, visibility .16s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; visibility: visible; transform: translate(-50%, 0); }
+  .toast.error { border-color: #5b2836; color: #ffb3bd; background: #1b0f14; }
+
+  @media (max-width: 980px) {
+    .file-info { display: none; }
+  }
+  @media (max-width: 1080px) {
+    .stage { grid-template-columns: minmax(0, 1fr) 292px; }
+    .file-info { max-width: 220px; }
+  }
+  @media (max-width: 900px) {
+    .stage { grid-template-columns: minmax(0, 1fr); padding: 8px 8px 0; }
+    .sidebar {
+      position: fixed; top: 66px; right: 8px; bottom: 70px; width: min(322px, calc(100vw - 16px));
+      z-index: 40; padding: 0; transform: translateX(calc(100% + 18px));
+      transition: transform .2s ease;
+    }
+    .sidebar.open { transform: none; }
+    body.sidebar-hidden .sidebar { display: flex; }
+    .sidebar .card { box-shadow: 0 18px 50px rgba(0, 0, 0, .55); }
+    .topbar { padding: 8px 10px; }
+    .brand-text span { display: none; }
+    .file-info { max-width: 160px; }
+    .transport { padding: 8px 10px; }
+    #status { display: none; }
+  }
+  @media (max-width: 640px) {
+    .brand-text { display: none; }
+    .topbar .btn-label { display: none; }
+    .timebox { width: 84px; }
+    .transport input[type=range] { width: 58px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="logo" aria-hidden="true">≋</div>
+    <div class="brand-text"><strong>对齐台</strong><span>Align Studio</span></div>
+  </div>
+  <div class="divider" aria-hidden="true"></div>
+  <button id="btnLoadPack" class="primary" title="读取仓库里的 packs/i_never_forgot/chart.json 和 external_songs/我不曾忘记.m4a">
+    <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h7l2 2h7v11H4z"/><path d="M12 11v6m-3-3 3 3 3-3"/></svg>
+    <span class="btn-label">载入当前包</span>
+  </button>
+  <button id="btnAudio" title="选择音频文件">
+    <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg>
+    <span class="btn-label">载入音频</span>
+  </button>
+  <button id="btnChart" title="选择 chart.json">
+    <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h4M9 13h6M9 17h6"/></svg>
+    <span class="btn-label">载入谱面</span>
+  </button>
+  <span id="fileInfo" class="file-info">未载入</span>
+  <input type="file" id="audioFile" accept="audio/*" hidden>
+  <input type="file" id="chartFile" accept=".json,application/json" hidden>
+  <div class="grow"></div>
+  <button id="btnFit" title="整首铺满画布">适应</button>
+  <button id="btnSidebar" class="icon" title="显示/隐藏侧栏" aria-label="切换侧栏">
+    <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg>
+  </button>
+  <button id="btnHelp" class="icon" title="使用说明 (?)" aria-label="帮助">
+    <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.3 9.2a2.8 2.8 0 1 1 4 2.6c-.9.4-1.3 1-1.3 2"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/></svg>
+  </button>
+  <button id="btnExport" class="primary" title="导出 chart.json">
+    <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v11"/><path d="m8 10 4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+    <span class="btn-label">导出 chart.json</span>
+  </button>
+</header>
+
+<div class="stage" id="stage">
+  <section class="canvas-card" id="canvasCard">
+    <canvas id="view" aria-label="对齐画布"></canvas>
+
+    <div class="empty" id="emptyState">
+      <div>
+        <div class="badge" aria-hidden="true">≋</div>
+        <h2>把音频和谱面放进来对齐</h2>
+        <p>网格相位、整体偏移、逐音拖动，改完直接导出 <code>chart.json</code>。</p>
+        <div class="row">
+          <button id="btnLoadPackEmpty" class="primary">载入当前包</button>
+          <label class="btn" for="audioFile">选择音频</label>
+          <label class="btn" for="chartFile">选择谱面</label>
+        </div>
+        <p class="hint">「载入当前包」需要 HTTP 服务：在仓库根目录运行
+          <code>python -m http.server 8000</code>，再打开
+          <code>http://localhost:8000/tools/align_studio.html</code>。
+          也可以直接把两个文件拖进窗口。</p>
+      </div>
+    </div>
+
+    <div class="busy" id="busy" hidden>
+      <div class="spinner" aria-hidden="true"></div>
+      <span id="busyText">载入中…</span>
+    </div>
+    <div class="drag-over" id="dragOver">松手载入音频或谱面</div>
+  </section>
+
+  <aside class="sidebar" id="sidebar">
+    <section class="card">
+      <div class="card-head"><h2>网格</h2><span class="chip" id="gridBpm">≈160 BPM · 1/16</span></div>
+      <div class="field">
+        <label for="unitMs">格距</label>
+        <input type="number" id="unitMs" min="5" max="1000" step="0.001" value="93.75">
+        <span class="unit">ms</span>
+      </div>
+      <div class="presets" id="unitPresets">
+        <button type="button" data-unit="187.5">0.1875s</button>
+        <button type="button" data-unit="93.75" class="on">0.09375s</button>
+        <button type="button" data-unit="46.875">0.046875s</button>
+      </div>
+      <div class="field">
+        <label for="phaseMs">相位</label>
+        <input type="number" id="phaseMs" min="0" max="93.75" step="0.1" value="27.6">
+        <span class="unit">ms</span>
+      </div>
+      <input type="range" id="phaseRange" min="0" max="93.75" step="0.1" value="27.6" aria-label="网格相位">
+      <div class="row tight">
+        <button id="btnAutoPhase" class="primary">自动相位</button>
+        <button id="btnPhaseZero">归零</button>
+        <button id="btnDragSnap" class="toggle on" title="拖动音符时吸附到网格">拖动吸附</button>
+      </div>
+      <p class="hint" id="gridHint">0.09375s 一格；约等于 160 BPM 的 1/16。相位控制整张网格的左右位置。</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>对齐</h2><span class="chip warn" id="dirtyChip" hidden>已修改</span></div>
+      <div class="field">
+        <label for="offsetMs">整体偏移</label>
+        <input type="number" id="offsetMs" min="-200" max="200" step="0.1" value="0">
+        <span class="unit">ms</span>
+      </div>
+      <input type="range" id="offsetRange" min="-200" max="200" step="0.1" value="0" aria-label="整体偏移">
+      <div class="nudge-row">
+        <button type="button" data-offset="-10">−10ms</button>
+        <button type="button" data-offset="-1">−1ms</button>
+        <button type="button" data-offset="1">+1ms</button>
+        <button type="button" data-offset="10">+10ms</button>
+      </div>
+      <p class="hint">相位是整体平移；偏移预览在 100% 量化下会被吸回，要平移请用「相位」或「仅偏移」。</p>
+      <div class="field">
+        <label for="strength">量化强度</label>
+        <input type="range" id="strength" min="0" max="100" step="1" value="100">
+        <span class="unit mono" id="strengthVal">100%</span>
+      </div>
+      <div class="stats">
+        <div><span>当前偏差 · 中位/p90</span><b id="statCurrent">—</b></div>
+        <div><span>预览移动 · 中位/p90</span><b id="statPreview">—</b></div>
+        <div><span>预览后 ≤10/20/30ms</span><b id="statBands">—</b></div>
+        <div><span>合并时间点</span><b id="statMerge">—</b></div>
+      </div>
+      <div class="row tight">
+        <button id="btnQuantize" class="primary">应用量化</button>
+        <button id="btnShift">仅偏移</button>
+        <button id="btnUndo" disabled>撤销</button>
+        <button id="btnRedo" disabled>重做</button>
+      </div>
+      <p class="hint" id="quantHint">黄色刻度是预览目标；应用后才会改写音符。</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>试听</h2></div>
+      <div class="row tight">
+        <button id="btnMetro" class="toggle">网格节拍</button>
+        <button id="btnNoteClick" class="toggle">音符点击</button>
+        <button id="btnPreviewClick" class="toggle">目标点击</button>
+      </div>
+      <p class="hint">播放时先开「网格节拍」听拍点，再轮流开「音符点击 / 目标点击」比对；两种点击音高不同。</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>文件</h2></div>
+      <div class="file-lines">
+        <div><span>音频</span><b id="audioName">—</b></div>
+        <div><span>谱面</span><b id="chartName">—</b></div>
+        <div><span>音符</span><b id="noteCount">0</b></div>
+      </div>
+      <div class="row tight">
+        <button id="btnRevert">恢复载入版本</button>
+        <button id="btnExport2">导出 chart.json</button>
+      </div>
+      <p class="hint">导出后仍需重打包才会进游戏：<br>
+        <code>python tools/make_pack.py --src packs/i_never_forgot --audio 音频</code></p>
+    </section>
+  </aside>
+</div>
+
+<footer class="transport">
+  <button id="btnPlay" class="play" aria-label="播放">
+    <svg class="i i-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.2v13.6L19 12z"/></svg>
+    <svg class="i i-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+  </button>
+  <div class="timebox">
+    <div id="timeNow" class="mono">0:00.000</div>
+    <div id="timeTotal" class="mono">/ 0:00</div>
+  </div>
+  <label for="speed">速度</label>
+  <select id="speed">
+    <option value="0.5">0.5×</option>
+    <option value="0.75">0.75×</option>
+    <option value="1" selected>1×</option>
+  </select>
+  <label for="volume">音量</label>
+  <input type="range" id="volume" min="0" max="1" step="0.02" value="0.9" aria-label="音量">
+  <button id="btnFollow" class="toggle on" title="播放时画面跟随 (F)">跟随</button>
+  <div class="zoom">
+    <button id="btnZoomOut" title="缩小">−</button>
+    <button id="btnZoomIn" title="放大">+</button>
+  </div>
+  <div class="grow"></div>
+  <span id="status">先载入音频和谱面</span>
+</footer>
+
+<dialog id="helpDlg" aria-labelledby="helpTitle">
+  <div class="dlg-head">
+    <h2 id="helpTitle">对齐台使用说明</h2>
+    <button class="icon" data-close="helpDlg" aria-label="关闭">✕</button>
+  </div>
+  <div class="dlg-body">
+    <h3>流程</h3>
+    <p>① 点「载入当前包」或拖入音频 + <code>chart.json</code>。② 先点「自动相位」，让网格贴合你现有的音符。③ 播放，开「网格节拍」听拍点。④ 调「整体偏移」和「量化强度」，黄色刻度会显示目标位置；轮流开「音符点击 / 目标点击」比对声音。⑤ 点「应用量化」或「仅偏移」，试听，撤销/重做，最后导出 <code>chart.json</code>。</p>
+    <h3>三个参数</h3>
+    <p><b>格距</b>：网格的间距。0.1875s 是 160 BPM 的 1/8；0.09375s 是 1/16；0.046875s 是 1/32。按毫秒填也可以。</p>
+    <p><b>相位</b>：整张网格左右平移，不改音符。点「自动相位」会把网格移到当前音符的平均相位。要整体平移且仍然卡在格点上，优先调相位。</p>
+    <p><b>整体偏移</b>：只移动音符做预览，点「仅偏移」或「应用量化」才会写进谱面。量化强度 100% 会把音吸附到最近格点，小于半格的偏移会被吸回；要整体平移请用「相位」或「仅偏移」。</p>
+    <h3>快捷键</h3>
+    <div class="keys">
+      <kbd>空格</kbd><span>播放 / 暂停</span>
+      <kbd>← →</kbd><span>有选中音符：±1ms（Shift ±5ms）；没有选中：±1 秒</span>
+      <kbd>↑ ↓</kbd><span>选中上一个 / 下一个音符</span>
+      <kbd>Del</kbd><span>删除选中音符</span>
+      <kbd>Ctrl+Z / Ctrl+Shift+Z</kbd><span>撤销 / 重做</span>
+      <kbd>F</kbd><span>播放跟随</span>
+      <kbd>M / N / P</kbd><span>网格节拍 / 音符点击 / 目标点击</span>
+      <kbd>Home / End</kbd><span>开头 / 结尾</span>
+      <kbd>滚轮 / Ctrl+滚轮</kbd><span>横向滚动 / 缩放</span>
+      <kbd>Esc</kbd><span>取消选中</span>
+      <kbd>?</kbd><span>打开说明</span>
+    </div>
+    <h3>载入当前包</h3>
+    <p>页面会读取 <code>../packs/i_never_forgot/chart.json</code> 和 <code>../external_songs/我不曾忘记.m4a</code>。直接双击打开是 <code>file://</code>，浏览器不允许读相对文件；在仓库根目录运行 <code>python -m http.server 8000</code>，打开 <code>http://localhost:8000/tools/align_studio.html</code> 即可。也可以手动选文件。</p>
+    <h3>导出之后</h3>
+    <p>导出的 <code>chart.json</code> 覆盖 <code>packs/i_never_forgot/chart.json</code>，再运行 <code>python tools/make_pack.py --src packs/i_never_forgot --audio external_songs/我不曾忘记.m4a</code> 重打包。manifest 不受影响。</p>
+  </div>
+  <div class="dlg-foot">
+    <button class="primary" data-close="helpDlg">知道了</button>
+  </div>
+</dialog>
+
+<div class="tip" id="tip" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+
+/* ================================================================== 基础 */
+const $ = (id) => document.getElementById(id);
+const LANES = 6;
+const LANE_LABELS = ["A", "S", "D", "J", "K", "L"];
+const LANE_COLORS = ["#3fc9ff", "#5ee6a8", "#ffcf5c", "#ff79c6", "#8b9dff", "#ff9f5e"];
+const LANE_RGB = [[63, 201, 255], [94, 230, 168], [255, 207, 92], [255, 121, 198], [139, 157, 255], [255, 159, 94]];
+const MONO = '"Cascadia Mono", "JetBrains Mono", Consolas, ui-monospace, monospace';
+const SANS = '"Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif';
+const PX_MIN = 1.5;
+const PX_MAX = 2200;
+
+window.__errors = [];
+window.addEventListener("error", (e) => window.__errors.push(String(e.message)));
+window.addEventListener("unhandledrejection", (e) => window.__errors.push(String(e.reason)));
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const round6 = (v) => Math.round(v * 1e6) / 1e6;
+const laneColor = (lane, a = 1) => {
+  const c = LANE_RGB[lane] || [255, 255, 255];
+  return `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${a})`;
+};
+function fmtTime(t) {
+  if (!isFinite(t) || t < 0) t = 0;
+  const m = Math.floor(t / 60), s = Math.floor(t % 60), ms = Math.floor((t * 1000) % 1000);
+  return `${m}:${String(s).padStart(2, "0")}.${String(ms).padStart(3, "0")}`;
+}
+function fmtClock(t) {
+  if (!isFinite(t) || t < 0) t = 0;
+  const m = Math.floor(t / 60), s = Math.floor(t % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+function fmtFrac(t, dec) {
+  if (!isFinite(t) || t < 0) t = 0;
+  const m = Math.floor(t / 60), q = Math.pow(10, dec);
+  const s = Math.floor((t - m * 60) * q) / q;
+  return `${m}:${s.toFixed(dec).padStart(dec === 2 ? 5 : 4, "0")}`;
+}
+function median(arr) {
+  if (!arr.length) return 0;
+  const s = [...arr].sort((a, b) => a - b), k = s.length >> 1;
+  return s.length % 2 ? s[k] : (s[k - 1] + s[k]) / 2;
+}
+function percentile(arr, p) {
+  if (!arr.length) return 0;
+  const s = [...arr].sort((a, b) => a - b);
+  const i = clamp((s.length - 1) * p, 0, s.length - 1);
+  const lo = Math.floor(i), hi = Math.ceil(i);
+  return s[lo] + (s[hi] - s[lo]) * (i - lo);
+}
+
+/* ================================================================== 状态 */
+const state = {
+  notes: [],
+  original: [],
+  sel: null,
+  unit: 0.09375,
+  phase: 0.027595,
+  offset: 0,
+  strength: 1,
+  speed: 1,
+  volume: 0.9,
+  pxPerSec: 180,
+  t0: 0,
+  follow: true,
+  metro: false,
+  noteClick: false,
+  previewClick: false,
+  dragSnap: true,
+  drag: null,
+  hover: null,
+  chartName: "",
+  audioName: "",
+  dirty: false,
+  previewPending: false,
+  uniqueTimes: [],
+  previewTimes: [],
+};
+const audio = {
+  ctx: null, buffer: null, src: null, gain: null,
+  startCtx: 0, startPos: 0, playing: false,
+  duration: 0, peaks: null,
+};
+const hist = { undo: [], redo: [] };
+const view = { w: 0, h: 0 };
+let needsDraw = true;
+let busyDepth = 0;
+let toastTimer = null;
+let revertArmed = false;
+let revertTimer = null;
+let exportArmed = false;
+let exportTimer = null;
+let metroNext = 0;
+let noteCursor = 0;
+let previewCursor = 0;
+
+const viewCanvas = $("view");
+const ctx = viewCanvas.getContext("2d");
+
+/* ================================================================== 提示 */
+function toast(msg, kind = "", ms = 2600) {
+  const el = $("toast");
+  el.textContent = msg;
+  el.classList.toggle("error", kind === "error");
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), ms);
+}
+function showBusy(text) {
+  busyDepth++;
+  $("busyText").textContent = text;
+  $("busy").hidden = false;
+}
+function hideBusy() {
+  busyDepth = Math.max(0, busyDepth - 1);
+  if (!busyDepth) $("busy").hidden = true;
+}
+function showTip(text, clientX, clientY) {
+  const tip = $("tip");
+  tip.textContent = text;
+  tip.hidden = false;
+  const half = Math.min(160, tip.offsetWidth / 2 + 4);
+  const x = clamp(clientX, half + 8, window.innerWidth - half - 8);
+  const y = clamp(clientY, 4, window.innerHeight - 4);
+  tip.classList.toggle("below", y < 58);
+  tip.style.left = `${x}px`;
+  tip.style.top = `${y}px`;
+}
+function hideTip() { $("tip").hidden = true; }
+function showEmpty(on) { $("emptyState").hidden = !on; }
+function blurTextFocus() {
+  const el = document.activeElement;
+  if (el && (el.tagName === "INPUT" || el.tagName === "SELECT" || el.tagName === "TEXTAREA" || el.isContentEditable)) el.blur();
+}
+
+/* ================================================================== 音频 */
+function ensureCtx() {
+  if (!audio.ctx) {
+    const C = window.AudioContext || window.webkitAudioContext;
+    if (!C) { toast("这个浏览器不支持 WebAudio", "error"); return null; }
+    audio.ctx = new C();
+  }
+  if (audio.ctx.state === "suspended") audio.ctx.resume().catch(() => {});
+  return audio.ctx;
+}
+function duration() { return audio.buffer ? audio.buffer.duration : 0; }
+function position() {
+  if (!audio.ctx || !audio.playing) return audio.startPos;
+  const t = audio.startPos + (audio.ctx.currentTime - audio.startCtx) * state.speed;
+  return audio.buffer ? Math.min(t, audio.buffer.duration) : t;
+}
+function stopSrc() {
+  if (audio.src) {
+    try { audio.src.onended = null; audio.src.stop(); } catch (err) { /* already stopped */ }
+    audio.src = null;
+  }
+}
+function play() {
+  if (!audio.buffer) { toast("先载入音频"); return; }
+  const c = ensureCtx();
+  if (!c) return;
+  stopSrc();
+  if (audio.startPos >= duration() - 0.01) audio.startPos = 0;
+  const src = c.createBufferSource();
+  src.buffer = audio.buffer;
+  src.playbackRate.value = state.speed;
+  const gain = c.createGain();
+  gain.gain.value = state.volume;
+  src.connect(gain);
+  gain.connect(c.destination);
+  src.start(0, audio.startPos);
+  src.onended = () => {
+    if (audio.src !== src) return;
+    audio.playing = false;
+    audio.startPos = duration();
+    audio.src = null;
+    syncPlayButton();
+    needsDraw = true;
+  };
+  audio.src = src;
+  audio.gain = gain;
+  audio.startCtx = c.currentTime;
+  audio.playing = true;
+  resetSchedulers();
+  syncPlayButton();
+  needsDraw = true;
+}
+function pause() {
+  if (!audio.playing) return;
+  audio.startPos = clamp(position(), 0, duration());
+  stopSrc();
+  audio.playing = false;
+  syncPlayButton();
+  needsDraw = true;
+}
+function togglePlay() { audio.playing ? pause() : play(); }
+function syncPlayButton() {
+  $("btnPlay").classList.toggle("playing", audio.playing);
+  $("btnPlay").setAttribute("aria-label", audio.playing ? "暂停" : "播放");
+}
+function setPos(t) {
+  audio.startPos = clamp(t, 0, Math.max(0, duration()));
+  resetSchedulers();
+  needsDraw = true;
+}
+function seek(t) {
+  const was = audio.playing;
+  if (was) pause();
+  setPos(t);
+  if (was) play();
+}
+function setSpeed(v) {
+  v = [0.5, 0.75, 1].includes(+v) ? +v : 1;
+  if (v === state.speed) return;
+  const was = audio.playing;
+  if (was) pause();
+  state.speed = v;
+  $("speed").value = String(v);
+  if (was) play();
+  else resetSchedulers();
+  needsDraw = true;
+}
+function setVolume(v) {
+  state.volume = clamp(+v, 0, 1);
+  if (audio.gain) audio.gain.gain.value = state.volume;
+  $("volume").value = String(state.volume);
+}
+function scheduleClick(when, gainValue, freq, dur = 0.03) {
+  const c = audio.ctx;
+  if (!c) return;
+  const at = Math.max(when, c.currentTime + 0.001);
+  const o = c.createOscillator(), g = c.createGain();
+  o.type = "sine";
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(Math.max(0.0002, gainValue), at + 0.003);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  o.connect(g);
+  g.connect(c.destination);
+  o.start(at);
+  o.stop(at + dur + 0.02);
+}
+function ctxTimeFor(t) {
+  if (!audio.ctx) return 0;
+  return audio.startCtx + (t - audio.startPos) / state.speed;
+}
+function uniqueTimes(notes) {
+  const set = new Set();
+  for (const n of notes) set.add(round6(n.t));
+  return [...set].sort((a, b) => a - b);
+}
+function firstIndexAtOrAfter(times, t) {
+  let lo = 0, hi = times.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (times[mid] < t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+function nextGridAfter(t) {
+  const u = state.unit;
+  if (!(u > 0)) return t;
+  const n = Math.ceil((t - state.phase) / u);
+  return state.phase + n * u;
+}
+function resetSchedulers() {
+  metroNext = nextGridAfter(position() + 0.01);
+  state.uniqueTimes = uniqueTimes(state.notes);
+  state.previewTimes = uniqueTimes(state.notes.map((n) => ({ t: targetFor(n.t) })));
+  noteCursor = firstIndexAtOrAfter(state.uniqueTimes, position() + 0.01);
+  previewCursor = firstIndexAtOrAfter(state.previewTimes, position() + 0.01);
+}
+setInterval(() => {
+  if (!audio.playing || !audio.ctx) return;
+  const c = audio.ctx;
+  const pos = position();
+  const horizon = pos + 0.25;
+
+  if (state.metro && state.unit >= 0.04) {
+    while (metroNext < pos - 0.05) metroNext += state.unit;
+    while (metroNext <= horizon) {
+      const idx = Math.round((metroNext - state.phase) / state.unit);
+      const at = ctxTimeFor(metroNext);
+      if (at >= c.currentTime - 0.03) {
+        scheduleClick(at, state.volume * (idx % 4 === 0 ? 0.13 : 0.065), idx % 4 === 0 ? 1400 : 1000, 0.033);
+      }
+      metroNext += state.unit;
+    }
+  }
+  if (state.noteClick) {
+    while (noteCursor < state.uniqueTimes.length && state.uniqueTimes[noteCursor] < pos - 0.06) noteCursor++;
+    while (noteCursor < state.uniqueTimes.length && state.uniqueTimes[noteCursor] <= horizon) {
+      const at = ctxTimeFor(state.uniqueTimes[noteCursor]);
+      if (at >= c.currentTime - 0.03) scheduleClick(at, state.volume * 0.13, 1560, 0.028);
+      noteCursor++;
+    }
+  }
+  if (state.previewClick) {
+    while (previewCursor < state.previewTimes.length && state.previewTimes[previewCursor] < pos - 0.06) previewCursor++;
+    while (previewCursor < state.previewTimes.length && state.previewTimes[previewCursor] <= horizon) {
+      const at = ctxTimeFor(state.previewTimes[previewCursor]);
+      if (at >= c.currentTime - 0.03) scheduleClick(at, state.volume * 0.13, 1180, 0.028);
+      previewCursor++;
+    }
+  }
+}, 30);
+
+/* ================================================================== 网格 / 目标 */
+function gridSnap(t) {
+  const u = state.unit;
+  if (!(u > 0)) return t;
+  return state.phase + Math.round((t - state.phase) / u) * u;
+}
+function targetFor(t) {
+  const raw = t + state.offset;
+  const snapped = Math.max(0, gridSnap(raw));
+  return round6(Math.max(0, t + state.strength * (snapped - t)));
+}
+function setUnit(seconds) {
+  const u = clamp(+seconds || 0.09375, 0.005, 1.0);
+  state.unit = u;
+  state.phase = clamp(state.phase, 0, u);
+  autoPhase();
+  syncGridUI();
+  syncPhaseRange();
+  updateStats();
+  resetSchedulers();
+  needsDraw = true;
+}
+function setPhase(seconds) {
+  const u = state.unit;
+  state.phase = clamp(+seconds || 0, 0, u);
+  syncPhaseUI();
+  updateStats();
+  resetSchedulers();
+  needsDraw = true;
+}
+function autoPhase() {
+  const u = state.unit;
+  if (!state.notes.length || !(u > 0)) {
+    state.phase = 0;
+    syncPhaseUI();
+    return;
+  }
+  let sx = 0, sy = 0;
+  for (const n of state.notes) {
+    const a = 2 * Math.PI * n.t / u;
+    sx += Math.cos(a);
+    sy += Math.sin(a);
+  }
+  let p = (Math.atan2(sy, sx) / (2 * Math.PI)) * u;
+  p = ((p % u) + u) % u;
+  state.phase = p;
+  syncPhaseUI();
+}
+function syncGridUI() {
+  if (document.activeElement !== $("unitMs")) $("unitMs").value = String(Number((state.unit * 1000).toFixed(3)));
+  const ms = state.unit * 1000;
+  [...$("unitPresets").children].forEach((b) => {
+    b.classList.toggle("on", Math.abs(+b.dataset.unit - ms) < 1e-6);
+  });
+  let label;
+  if (Math.abs(ms - 187.5) < 1e-6) label = "≈160 BPM · 1/8";
+  else if (Math.abs(ms - 93.75) < 1e-6) label = "≈160 BPM · 1/16";
+  else if (Math.abs(ms - 46.875) < 1e-6) label = "≈160 BPM · 1/32";
+  else label = `${ms.toFixed(2)} ms/格`;
+  $("gridBpm").textContent = label;
+  $("gridHint").textContent = `${(state.unit * 1000).toFixed(3)}s 一格；相位控制整张网格的左右位置。`;
+}
+function syncPhaseRange() {
+  const max = state.unit * 1000;
+  $("phaseMs").max = String(max);
+  $("phaseRange").max = String(max);
+}
+function syncPhaseUI() {
+  const ms = state.phase * 1000;
+  if (document.activeElement !== $("phaseMs")) $("phaseMs").value = String(Number(ms.toFixed(3)));
+  if (document.activeElement !== $("phaseRange")) $("phaseRange").value = String(ms);
+}
+function syncOffsetUI() {
+  const ms = state.offset * 1000;
+  if (document.activeElement !== $("offsetMs")) $("offsetMs").value = String(Number(ms.toFixed(1)));
+  if (document.activeElement !== $("offsetRange")) $("offsetRange").value = String(ms);
+}
+function setOffset(ms) {
+  state.offset = clamp(+ms || 0, -200, 200) / 1000;
+  syncOffsetUI();
+  updateStats();
+  resetSchedulers();
+  needsDraw = true;
+}
+function setStrength(pct) {
+  state.strength = clamp(+pct || 0, 0, 100) / 100;
+  $("strength").value = String(Math.round(state.strength * 100));
+  $("strengthVal").textContent = `${Math.round(state.strength * 100)}%`;
+  updateStats();
+  resetSchedulers();
+  needsDraw = true;
+}
+
+/* ================================================================== 统计 */
+function updateStats() {
+  state.uniqueTimes = uniqueTimes(state.notes);
+  state.previewTimes = uniqueTimes(state.notes.map((n) => ({ t: targetFor(n.t) })));
+  const currentDevs = state.notes.map((n) => Math.abs(n.t - gridSnap(n.t)));
+  const targets = state.notes.map((n) => targetFor(n.t));
+  const moves = targets.map((t, i) => Math.abs(t - state.notes[i].t));
+  const previewDevs = targets.map((t) => Math.abs(t - gridSnap(t)));
+  const curMed = median(currentDevs), curP90 = percentile(currentDevs, 0.9);
+  const preMed = median(moves), preP90 = percentile(moves, 0.9);
+  const bands = [0.01, 0.02, 0.03].map((thr) =>
+    previewDevs.length ? Math.round((previewDevs.filter((d) => d <= thr).length / previewDevs.length) * 100) : 0);
+  const curUnique = state.uniqueTimes.length;
+  const preUnique = state.previewTimes.length;
+  const merged = Math.max(0, curUnique - preUnique);
+  const dupTargets = new Set();
+  const seen = new Set();
+  let dup = 0;
+  for (let i = 0; i < state.notes.length; i++) {
+    const key = `${targets[i]}|${state.notes[i].lane}`;
+    if (seen.has(key)) { dup++; dupTargets.add(key); } else seen.add(key);
+  }
+  state.dirty = JSON.stringify(state.notes) !== JSON.stringify(state.original);
+  const pending = state.notes.some((n) => Math.abs(targetFor(n.t) - n.t) > 1e-6);
+  state.previewPending = pending;
+
+  $("statCurrent").textContent = state.notes.length ? `${(curMed * 1000).toFixed(1)} / ${(curP90 * 1000).toFixed(1)} ms` : "—";
+  $("statPreview").textContent = state.notes.length ? `${(preMed * 1000).toFixed(1)} / ${(preP90 * 1000).toFixed(1)} ms` : "—";
+  $("statBands").textContent = state.notes.length ? `${bands[0]} / ${bands[1]} / ${bands[2]}%` : "—";
+  $("statMerge").textContent = state.notes.length ? `${merged} 个${dup ? ` · ${dup} 重复` : ""}` : "—";
+  $("dirtyChip").hidden = !(state.dirty || pending);
+  $("dirtyChip").textContent = pending ? "有未应用预览" : "已修改";
+  $("quantHint").classList.toggle("warn", merged > 0 || dup > 0);
+  $("quantHint").textContent = !state.notes.length
+    ? "载入谱面后，这里显示量化预览。"
+    : (merged > 0 || dup > 0)
+      ? `应用会合并 ${merged} 个时间点${dup ? `，并去掉 ${dup} 个同轨重复` : ""}。黄色刻度是预览目标。`
+      : "黄色刻度是预览目标；应用后才会改写音符。";
+  $("btnQuantize").disabled = !state.notes.length;
+  $("btnShift").disabled = !state.notes.length || !state.offset;
+  $("btnUndo").disabled = hist.undo.length === 0;
+  $("btnRedo").disabled = hist.redo.length === 0;
+  $("btnExport").disabled = !state.notes.length;
+  $("btnExport2").disabled = !state.notes.length;
+  $("noteCount").textContent = String(state.notes.length);
+  updateFileInfo();
+  updateStatus();
+  needsDraw = true;
+}
+function updateFileInfo() {
+  const parts = [];
+  if (state.audioName) parts.push(state.audioName);
+  if (state.chartName) parts.push(state.chartName);
+  if (state.notes.length) parts.push(`${state.notes.length} 音符`);
+  $("fileInfo").textContent = parts.length ? parts.join(" · ") : "未载入";
+  $("fileInfo").classList.toggle("ok", !!state.audioName && !!state.notes.length);
+  $("audioName").textContent = state.audioName || "—";
+  $("chartName").textContent = state.chartName || "—";
+  $("timeTotal").textContent = audio.buffer ? `/ ${fmtClock(duration())}` : "/ 0:00";
+}
+function updateStatus() {
+  let text;
+  if (state.sel != null) {
+    const n = state.notes.find((m) => m.id === state.sel);
+    text = n ? `选中 ${fmtTime(n.t)} · 轨道 ${LANE_LABELS[n.lane]} · 拖动改时间，←/→ ±1ms` : "就绪";
+  } else if (!state.audioName) {
+    text = "先载入音频和谱面";
+  } else if (!state.notes.length) {
+    text = "音频已载入，等待谱面";
+  } else {
+    text = `${state.notes.length} 音符 · 调格距/相位/偏移，看黄色目标，再应用`;
+  }
+  $("status").textContent = text;
+}
+
+/* ================================================================== 历史 */
+function pushUndo() {
+  hist.undo.push(JSON.stringify(state.notes));
+  if (hist.undo.length > 120) hist.undo.shift();
+  hist.redo.length = 0;
+}
+function restoreNotes(json) {
+  state.notes = JSON.parse(json);
+  state.sel = null;
+  state.offset = 0;
+  state.strength = 1;
+  syncOffsetUI();
+  $("strength").value = "100";
+  $("strengthVal").textContent = "100%";
+  updateStats();
+  resetSchedulers();
+  needsDraw = true;
+}
+function undo() {
+  if (!hist.undo.length) { toast("没有可撤销的操作"); return; }
+  hist.redo.push(JSON.stringify(state.notes));
+  restoreNotes(hist.undo.pop());
+}
+function redo() {
+  if (!hist.redo.length) { toast("没有可重做的操作"); return; }
+  hist.undo.push(JSON.stringify(state.notes));
+  restoreNotes(hist.redo.pop());
+}
+
+/* ================================================================== 应用 */
+function applyQuantize() {
+  if (!state.notes.length) { toast("还没有谱面"); return; }
+  const targets = state.notes.map((n) => targetFor(n.t));
+  const seen = new Set();
+  const out = [];
+  let dropped = 0;
+  for (let i = 0; i < state.notes.length; i++) {
+    const n = state.notes[i];
+    const key = `${targets[i]}|${n.lane}`;
+    if (seen.has(key)) { dropped++; continue; }
+    seen.add(key);
+    out.push({ id: n.id, t: targets[i], lane: n.lane });
+  }
+  out.sort((a, b) => a.t - b.t || a.lane - b.lane);
+  const curUnique = state.uniqueTimes.length;
+  const targetUnique = new Set(targets.map(round6)).size;
+  const merged = Math.max(0, curUnique - targetUnique);
+  pushUndo();
+  state.notes = out;
+  state.sel = null;
+  state.offset = 0;
+  state.strength = 1;
+  syncOffsetUI();
+  $("strength").value = "100";
+  $("strengthVal").textContent = "100%";
+  updateStats();
+  resetSchedulers();
+  needsDraw = true;
+  toast(`已量化 ${state.notes.length} 个音符${dropped ? ` · 去掉 ${dropped} 个同轨重复` : ""}${merged ? ` · 合并 ${merged} 个时间点` : ""}`);
+}
+function applyShift() {
+  if (!state.notes.length) { toast("还没有谱面"); return; }
+  if (!state.offset) { toast("整体偏移是 0"); return; }
+  const ms = Math.round(state.offset * 1000);
+  pushUndo();
+  state.notes = state.notes
+    .map((n) => ({ id: n.id, t: round6(Math.max(0, n.t + state.offset)), lane: n.lane }))
+    .sort((a, b) => a.t - b.t || a.lane - b.lane);
+  state.sel = null;
+  state.offset = 0;
+  syncOffsetUI();
+  updateStats();
+  resetSchedulers();
+  needsDraw = true;
+  toast(`已整体偏移 ${ms >= 0 ? "+" : ""}${ms}ms`);
+}
+function armRevert() {
+  const btn = $("btnRevert");
+  if (!state.original.length) { toast("还没有载入过谱面"); return; }
+  if (!revertArmed) {
+    revertArmed = true;
+    btn.classList.add("danger");
+    btn.textContent = "再点一次恢复";
+    toast("再点一次恢复载入时的谱面（可撤销）");
+    clearTimeout(revertTimer);
+    revertTimer = setTimeout(() => {
+      revertArmed = false;
+      btn.classList.remove("danger");
+      btn.textContent = "恢复载入版本";
+    }, 3200);
+    return;
+  }
+  clearTimeout(revertTimer);
+  revertArmed = false;
+  btn.classList.remove("danger");
+  btn.textContent = "恢复载入版本";
+  pushUndo();
+  state.notes = JSON.parse(JSON.stringify(state.original));
+  state.sel = null;
+  state.offset = 0;
+  state.strength = 1;
+  syncOffsetUI();
+  $("strength").value = "100";
+  $("strengthVal").textContent = "100%";
+  updateStats();
+  resetSchedulers();
+  needsDraw = true;
+  toast("已恢复载入时的谱面");
+}
+
+/* ================================================================== 载入 */
+function parseChart(data) {
+  const items = Array.isArray(data) ? data : data && data.notes;
+  if (!Array.isArray(items)) throw new Error("找不到 notes 数组");
+  const notes = [];
+  items.forEach((item, i) => {
+    let t, lane;
+    if (Array.isArray(item)) { t = item[0]; lane = item[1]; }
+    else if (item && typeof item === "object") { t = item.t; lane = item.lane; }
+    else throw new Error(`第 ${i + 1} 个音符格式不对`);
+    if (t === null || t === "" || lane === null || lane === "") throw new Error(`第 ${i + 1} 个音符缺少字段`);
+    t = Number(t); lane = Number(lane);
+    if (!isFinite(t) || t < 0) throw new Error(`第 ${i + 1} 个音符时间无效`);
+    if (!Number.isInteger(lane) || lane < 0 || lane >= LANES) throw new Error(`第 ${i + 1} 个音符轨道无效`);
+    notes.push({ id: i + 1, t: round6(t), lane });
+  });
+  if (!notes.length) throw new Error("谱面里没有音符");
+  notes.sort((a, b) => a.t - b.t || a.lane - b.lane);
+  return notes;
+}
+function setChartData(notes, name) {
+  if (audio.playing) pause();
+  state.notes = notes;
+  state.original = JSON.parse(JSON.stringify(notes));
+  state.sel = null;
+  state.chartName = name || "chart.json";
+  hist.undo.length = 0;
+  hist.redo.length = 0;
+  state.offset = 0;
+  state.strength = 1;
+  syncOffsetUI();
+  $("strength").value = "100";
+  $("strengthVal").textContent = "100%";
+  autoPhase();
+  syncGridUI();
+  syncPhaseRange();
+  syncPhaseUI();
+  if (audio.buffer) audio.startPos = clamp(notes[0].t - 0.8, 0, duration());
+  const anchor = audio.buffer ? audio.startPos : notes[0].t;
+  state.t0 = Math.max(0, anchor - 0.6);
+  state.follow = true;
+  $("btnFollow").classList.add("on");
+  state.pxPerSec = 180;
+  showEmpty(false);
+  updateStats();
+  resetSchedulers();
+  needsDraw = true;
+}
+function setAudioBuffer(buf, name) {
+  stopSrc();
+  audio.buffer = buf;
+  audio.duration = buf.duration;
+  audio.startPos = 0;
+  audio.playing = false;
+  audio.src = null;
+  audio.gain = null;
+  audio.peaks = buildPeaks(buf);
+  state.audioName = name || "audio";
+  if (state.notes.length) {
+    audio.startPos = clamp(state.notes[0].t - 0.8, 0, duration());
+    state.t0 = Math.max(0, audio.startPos - 0.6);
+  }
+  showEmpty(!state.notes.length);
+  updateFileInfo();
+  updateStatus();
+  needsDraw = true;
+  resetSchedulers();
+}
+function buildPeaks(buffer) {
+  const n = Math.min(24000, Math.max(800, Math.floor(buffer.duration * 120)));
+  const per = Math.max(1, Math.floor(buffer.length / n));
+  const stride = Math.max(1, Math.floor(per / 64));
+  const ch0 = buffer.getChannelData(0);
+  const ch1 = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : ch0;
+  const peaks = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let mx = 0;
+    const s = i * per, e = Math.min(buffer.length, s + per);
+    for (let j = s; j < e; j += stride) {
+      const v = Math.max(Math.abs(ch0[j]), Math.abs(ch1[j]));
+      if (v > mx) mx = v;
+    }
+    peaks[i] = mx;
+  }
+  return peaks;
+}
+async function loadAudioFile(file) {
+  if (!file) return;
+  const c = ensureCtx();
+  if (!c) return;
+  if (audio.playing) pause();
+  showBusy(`解码 ${file.name}…`);
+  try {
+    const buf = await c.decodeAudioData(await file.arrayBuffer());
+    setAudioBuffer(buf, file.name);
+    toast(`音频已载入：${file.name}`);
+  } catch (err) {
+    toast("浏览器解不了这个音频。.m4s 请先转封装：ffmpeg -i in.m4s -c:a copy out.m4a", "error", 6000);
+  } finally {
+    hideBusy();
+  }
+}
+async function loadChartFile(file) {
+  if (!file) return;
+  try {
+    const notes = parseChart(JSON.parse(await file.text()));
+    setChartData(notes, file.name);
+    toast(`谱面已载入：${notes.length} 个音符`);
+  } catch (err) {
+    toast(`谱面载入失败：${err.message}`, "error", 5000);
+  }
+}
+async function loadCurrentPack() {
+  if (location.protocol === "file:") {
+    toast("file:// 不能读相对文件。请在仓库根目录运行 python -m http.server 8000，再打开 http://localhost:8000/tools/align_studio.html", "error", 7000);
+    return;
+  }
+  showBusy("读取当前包…");
+  try {
+    const chartUrl = new URL("../packs/i_never_forgot/chart.json", location.href);
+    const audioUrl = new URL("../external_songs/" + encodeURIComponent("我不曾忘记.m4a"), location.href);
+    const [chartResp, audioResp] = await Promise.all([
+      fetch(chartUrl, { cache: "no-store" }),
+      fetch(audioUrl, { cache: "no-store" }),
+    ]);
+    if (!chartResp.ok) throw new Error(`chart ${chartResp.status}`);
+    if (!audioResp.ok) throw new Error(`audio ${audioResp.status}`);
+    const data = await chartResp.json();
+    const notes = parseChart(data);
+    const c = ensureCtx();
+    const buf = await c.decodeAudioData(await audioResp.arrayBuffer());
+    setAudioBuffer(buf, decodeURIComponent(audioUrl.pathname.split("/").pop() || "audio"));
+    setChartData(notes, "packs/i_never_forgot/chart.json");
+    toast(`已载入当前包 · ${notes.length} 音符 · ${fmtClock(duration())}`);
+  } catch (err) {
+    toast(`载入当前包失败：${err.message}。也可以在仓库根目录启动 http.server，或手动选择文件。`, "error", 7000);
+  } finally {
+    hideBusy();
+  }
+}
+function loadPackAndFit() {
+  loadCurrentPack();
+}
+
+/* ================================================================== 导出 */
+function chartText() {
+  const notes = [...state.notes]
+    .sort((a, b) => a.t - b.t || a.lane - b.lane)
+    .map((n) => [round6(n.t), n.lane]);
+  return JSON.stringify({ version: 1, notes }, null, 0) + "\n";
+}
+function download(text, name) {
+  const blob = new Blob([text], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 800);
+}
+function exportChart() {
+  if (!state.notes.length) { toast("还没有谱面"); return; }
+  if (state.previewPending) {
+    if (!exportArmed) {
+      exportArmed = true;
+      toast("当前有未应用的预览。再点一次「导出」只会导出当前音符位置，黄色目标不会写入；要写入请先点「应用量化」或「仅偏移」。", "error", 6000);
+      clearTimeout(exportTimer);
+      exportTimer = setTimeout(() => { exportArmed = false; }, 5000);
+      return;
+    }
+    exportArmed = false;
+    clearTimeout(exportTimer);
+  }
+  download(chartText(), "chart.json");
+  toast(`已导出 chart.json · ${state.notes.length} 个音符`);
+}
+
+/* ================================================================== 布局 */
+function maxT0(viewDur) {
+  return Math.max(0, duration() - viewDur);
+}
+function syncFollow() {
+  if (!audio.playing || !state.follow) return;
+  const plotW = Math.max(40, view.w - 38);
+  const viewDur = plotW / state.pxPerSec;
+  state.t0 = clamp(position() - viewDur * 0.25, 0, maxT0(viewDur));
+}
+function fitView() {
+  const plotW = Math.max(40, view.w - 38);
+  const dur = Math.max(0.5, duration() || (state.notes.length ? state.notes[state.notes.length - 1].t + 1 : 60));
+  state.pxPerSec = clamp(plotW / dur, PX_MIN, PX_MAX);
+  state.t0 = 0;
+  state.follow = false;
+  $("btnFollow").classList.remove("on");
+  needsDraw = true;
+}
+function zoomAt(factor, anchorX) {
+  const L = layout();
+  const tAnchor = L.timeAt(anchorX);
+  const next = clamp(state.pxPerSec * factor, PX_MIN, PX_MAX);
+  if (next === state.pxPerSec) return;
+  state.pxPerSec = next;
+  const viewDur = L.plotW / next;
+  state.t0 = clamp(tAnchor - (anchorX - L.plotX) / next, 0, maxT0(viewDur));
+  state.follow = false;
+  $("btnFollow").classList.remove("on");
+  needsDraw = true;
+}
+function zoomBy(factor) {
+  zoomAt(factor, (view.w + 38) / 2);
+}
+function layout() {
+  const w = view.w, h = view.h;
+  const gutter = 38;
+  const ruler = 28;
+  const waveH = Math.round(clamp(h * 0.22, 74, 150));
+  const lanesTop = ruler + waveH;
+  const laneH = Math.max(18, (h - lanesTop) / LANES);
+  const plotX = gutter;
+  const plotW = Math.max(60, w - gutter);
+  const pps = state.pxPerSec;
+  const viewDur = plotW / pps;
+  const t0 = clamp(state.t0, 0, maxT0(viewDur));
+  state.t0 = t0;
+  return {
+    w, h, gutter, ruler, waveH, lanesTop, laneH, plotX, plotW, pps, t0, viewDur,
+    xOf: (t) => plotX + (t - t0) * pps,
+    timeAt: (x) => t0 + (x - plotX) / pps,
+    laneY: (l) => lanesTop + l * laneH,
+    laneCenter: (l) => lanesTop + (l + 0.5) * laneH,
+  };
+}
+function resize() {
+  const rect = $("canvasCard").getBoundingClientRect();
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = Math.max(1, Math.round(rect.width));
+  const h = Math.max(1, Math.round(rect.height));
+  viewCanvas.width = Math.round(w * dpr);
+  viewCanvas.height = Math.round(h * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  view.w = w;
+  view.h = h;
+  needsDraw = true;
+}
+new ResizeObserver(resize).observe($("canvasCard"));
+window.addEventListener("resize", resize);
+
+/* ================================================================== 绘制 */
+function rr(x, y, w, h, r) {
+  const rad = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + rad, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rad);
+  ctx.arcTo(x + w, y + h, x, y + h, rad);
+  ctx.arcTo(x, y + h, x, y, rad);
+  ctx.arcTo(x, y, x + w, y, rad);
+  ctx.closePath();
+}
+function draw() {
+  syncFollow();
+  const L = layout();
+  ctx.clearRect(0, 0, L.w, L.h);
+  ctx.fillStyle = "#0b0f16";
+  ctx.fillRect(0, 0, L.w, L.h);
+
+  drawRuler(L);
+  drawWave(L);
+  drawLanes(L);
+  drawGrid(L);
+  drawNotes(L);
+  drawTargets(L);
+  drawPlayhead(L);
+  drawHover(L);
+}
+function drawRuler(L) {
+  const { plotX, plotW, ruler } = L;
+  ctx.fillStyle = "#0a0e15";
+  ctx.fillRect(0, 0, L.w, ruler);
+  ctx.strokeStyle = "#1c2738";
+  ctx.beginPath();
+  ctx.moveTo(plotX, ruler + 0.5);
+  ctx.lineTo(L.w, ruler + 0.5);
+  ctx.stroke();
+  const step = chooseStep(L.pps);
+  const t1 = L.t0 + plotW / L.pps;
+  const i0 = Math.max(0, Math.floor(L.t0 / step));
+  const i1 = Math.ceil(t1 / step);
+  ctx.font = `500 9.5px ${MONO}`;
+  ctx.fillStyle = "rgba(145,160,184,.72)";
+  ctx.textAlign = "left";
+  for (let i = i0; i <= i1; i++) {
+    const t = i * step;
+    const x = L.xOf(t);
+    if (x < plotX + 2 || x > plotX + plotW - 2) continue;
+    ctx.strokeStyle = "rgba(255,255,255,.1)";
+    ctx.beginPath();
+    ctx.moveTo(Math.round(x) + 0.5, ruler - 5);
+    ctx.lineTo(Math.round(x) + 0.5, ruler);
+    ctx.stroke();
+    const label = step >= 1 ? fmtClock(t) : fmtFrac(t, step < 0.5 ? 2 : 1);
+    ctx.fillText(label, x + 4, ruler - 9);
+  }
+  ctx.fillStyle = "rgba(125,138,164,.5)";
+  ctx.font = `500 8.5px ${SANS}`;
+  ctx.fillText("时间", plotX + 7, 11);
+  ctx.textAlign = "left";
+}
+function chooseStep(pps) {
+  const target = 88 / pps;
+  const steps = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
+  for (const s of steps) if (s >= target) return s;
+  return steps[steps.length - 1];
+}
+function drawWave(L) {
+  const { plotX, plotW, ruler, waveH } = L;
+  ctx.fillStyle = "#080c13";
+  ctx.fillRect(plotX, ruler, plotW, waveH);
+  ctx.strokeStyle = "#182231";
+  ctx.beginPath();
+  ctx.moveTo(plotX, ruler + 0.5);
+  ctx.lineTo(plotX + plotW, ruler + 0.5);
+  ctx.stroke();
+  if (!audio.peaks || !audio.buffer) {
+    ctx.fillStyle = "rgba(125,138,164,.45)";
+    ctx.font = `500 10.5px ${SANS}`;
+    ctx.textAlign = "center";
+    ctx.fillText("载入音频后，这里显示波形", plotX + plotW / 2, ruler + waveH / 2);
+    ctx.textAlign = "left";
+    return;
+  }
+  const dur = Math.max(0.001, duration());
+  const mid = ruler + waveH / 2;
+  const half = waveH / 2 - 5;
+  const paint = () => {
+    for (let px = 0; px < plotW; px += 2) {
+      const t = L.t0 + px / L.pps;
+      if (t < 0 || t > dur) continue;
+      const v = audio.peaks[Math.min(audio.peaks.length - 1, Math.floor((t / dur) * audio.peaks.length))] || 0;
+      const bh = Math.max(0.6, v * half);
+      ctx.fillRect(plotX + px, mid - bh, 2, bh * 2);
+    }
+  };
+  ctx.fillStyle = "rgba(116,142,177,.3)";
+  paint();
+  const headX = clamp(L.xOf(position()), plotX, plotX + plotW);
+  if (headX > plotX) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(plotX, ruler, headX - plotX, waveH);
+    ctx.clip();
+    ctx.fillStyle = "rgba(76,201,255,.42)";
+    paint();
+    ctx.restore();
+  }
+  ctx.strokeStyle = "rgba(255,255,255,.045)";
+  ctx.beginPath();
+  ctx.moveTo(plotX, mid + 0.5);
+  ctx.lineTo(plotX + plotW, mid + 0.5);
+  ctx.stroke();
+}
+function drawLanes(L) {
+  const { plotX, plotW, lanesTop, laneH, gutter } = L;
+  ctx.fillStyle = "#0a0e15";
+  ctx.fillRect(0, lanesTop, gutter, L.h - lanesTop);
+  ctx.strokeStyle = "#1c2738";
+  ctx.beginPath();
+  ctx.moveTo(gutter + 0.5, lanesTop);
+  ctx.lineTo(gutter + 0.5, L.h);
+  ctx.stroke();
+  for (let l = 0; l < LANES; l++) {
+    const y = lanesTop + l * laneH;
+    ctx.fillStyle = l % 2 ? "#0e1420" : "#0c111b";
+    ctx.fillRect(plotX, y, plotW, laneH);
+    ctx.strokeStyle = "rgba(255,255,255,.035)";
+    ctx.beginPath();
+    ctx.moveTo(plotX, y + 0.5);
+    ctx.lineTo(plotX + plotW, y + 0.5);
+    ctx.stroke();
+    ctx.fillStyle = laneColor(l, 0.72);
+    ctx.font = `700 10.5px ${MONO}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(LANE_LABELS[l], gutter / 2, y + laneH / 2 + 0.5);
+    ctx.fillStyle = laneColor(l, 0.06);
+    ctx.fillRect(0, y, 3, laneH);
+  }
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+}
+function drawGrid(L) {
+  const { plotX, plotW, ruler, h } = L;
+  const u = state.unit;
+  if (!(u > 0)) return;
+  const spacing = u * L.pps;
+  if (spacing < 1.2) return;
+  const minor = spacing >= 5;
+  const t1 = L.t0 + plotW / L.pps;
+  const i0 = Math.floor((L.t0 - state.phase) / u) - 1;
+  const i1 = Math.ceil((t1 - state.phase) / u) + 1;
+  for (let i = i0; i <= i1; i++) {
+    const major = i % 4 === 0;
+    if (!minor && !major) continue;
+    const t = state.phase + i * u;
+    const x = Math.round(L.xOf(t)) + 0.5;
+    if (x < plotX || x > plotX + plotW) continue;
+    ctx.strokeStyle = major ? "rgba(255,255,255,.1)" : "rgba(255,255,255,.035)";
+    ctx.beginPath();
+    ctx.moveTo(x, ruler);
+    ctx.lineTo(x, h);
+    ctx.stroke();
+  }
+}
+function drawNotes(L) {
+  const nh = Math.max(6, Math.min(L.laneH - 8, 18));
+  for (const n of state.notes) {
+    const x = L.xOf(n.t);
+    if (x < L.plotX - 12 || x > L.plotX + L.plotW + 12) continue;
+    const cy = L.laneCenter(n.lane);
+    const sel = n.id === state.sel;
+    if (sel) {
+      ctx.save();
+      ctx.shadowColor = laneColor(n.lane, .85);
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = laneColor(n.lane, .98);
+      rr(x - 6, cy - nh / 2, 12, nh, 3);
+      ctx.fill();
+      ctx.restore();
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(x - 8.5, cy - nh / 2 - 2.5, 17, nh + 5);
+      ctx.lineWidth = 1;
+    } else {
+      ctx.fillStyle = laneColor(n.lane, .9);
+      rr(x - 5.5, cy - nh / 2, 11, nh, 2.5);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.38)";
+      ctx.fillRect(x - 3.5, cy - nh / 2 + 1.5, 7, 1);
+    }
+  }
+}
+function drawTargets(L) {
+  const nh = Math.max(5, Math.min(L.laneH - 10, 14));
+  ctx.save();
+  for (const n of state.notes) {
+    const t = targetFor(n.t);
+    const dx = (t - n.t) * L.pps;
+    if (Math.abs(dx) < 0.6) continue;
+    const x0 = L.xOf(n.t);
+    const x1 = L.xOf(t);
+    const cy = L.laneCenter(n.lane);
+    if (x1 < L.plotX - 12 || x1 > L.plotX + L.plotW + 12) continue;
+    ctx.strokeStyle = "rgba(255,207,92,.28)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x0, cy);
+    ctx.lineTo(x1, cy);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,207,92,.82)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x1, cy - nh / 2);
+    ctx.lineTo(x1, cy + nh / 2);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(255,207,92,.9)";
+    ctx.beginPath();
+    ctx.moveTo(x1 - 3, cy - nh / 2 - 3);
+    ctx.lineTo(x1 + 3, cy - nh / 2 - 3);
+    ctx.lineTo(x1, cy - nh / 2);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+function drawPlayhead(L) {
+  const p = position();
+  const x = L.xOf(p);
+  if (x < L.plotX - 1 || x > L.w + 1) return;
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,206,92,.9)";
+  ctx.lineWidth = 1.5;
+  ctx.shadowColor = "rgba(255,206,92,.55)";
+  ctx.shadowBlur = 9;
+  ctx.beginPath();
+  ctx.moveTo(x + 0.5, 0);
+  ctx.lineTo(x + 0.5, L.h);
+  ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = "#ffce5c";
+  ctx.beginPath();
+  ctx.moveTo(x - 5, 0);
+  ctx.lineTo(x + 5, 0);
+  ctx.lineTo(x, L.ruler * 0.6);
+  ctx.closePath();
+  ctx.fill();
+}
+function drawHover(L) {
+  if (!state.hover || state.drag) return;
+  const x = L.xOf(state.hover.t);
+  if (x < L.plotX || x > L.plotX + L.plotW) return;
+  ctx.strokeStyle = "rgba(255,255,255,.16)";
+  ctx.beginPath();
+  ctx.moveTo(x + 0.5, L.ruler);
+  ctx.lineTo(x + 0.5, L.h);
+  ctx.stroke();
+}
+
+/* ================================================================== 指针 */
+function canvasPos(e) {
+  const r = viewCanvas.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+function hitNote(x, y) {
+  const L = layout();
+  if (y < L.lanesTop || x < L.plotX) return null;
+  const lane = Math.floor((y - L.lanesTop) / L.laneH);
+  if (lane < 0 || lane >= LANES) return null;
+  let best = null, bd = 10;
+  for (const n of state.notes) {
+    if (n.lane !== lane) continue;
+    const d = Math.abs(x - L.xOf(n.t));
+    if (d < bd) { bd = d; best = n; }
+  }
+  return best;
+}
+function selectNote(id) {
+  state.sel = id;
+  updateStatus();
+  needsDraw = true;
+}
+function revealNote(n) {
+  if (!n) return;
+  const L = layout();
+  const x = L.xOf(n.t);
+  if (x < L.plotX + 30 || x > L.plotX + L.plotW - 30) {
+    state.t0 = clamp(n.t - (L.plotW / L.pps) * 0.35, 0, maxT0(L.plotW / L.pps));
+    state.follow = false;
+    $("btnFollow").classList.remove("on");
+    needsDraw = true;
+  }
+}
+function onDown(e) {
+  if (e.button !== 0) return;
+  blurTextFocus();
+  const { x, y } = canvasPos(e);
+  const L = layout();
+  if (y < L.lanesTop) {
+    seek(clamp(L.timeAt(x), 0, duration()));
+    return;
+  }
+  if (x < L.plotX) return;
+  const n = hitNote(x, y);
+  if (n) {
+    selectNote(n.id);
+    state.drag = { id: n.id, startX: x, origT: n.t, before: JSON.stringify(state.notes), moved: false };
+    viewCanvas.setPointerCapture?.(e.pointerId);
+    viewCanvas.style.cursor = "grabbing";
+  } else {
+    selectNote(null);
+  }
+  needsDraw = true;
+}
+function onMove(e) {
+  const { x, y } = canvasPos(e);
+  if (state.drag) {
+    const rect = viewCanvas.getBoundingClientRect();
+    if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
+    const L = layout();
+    const n = state.notes.find((m) => m.id === state.drag.id);
+    if (!n) { state.drag = null; return; }
+    const raw = state.drag.origT + (x - state.drag.startX) / L.pps;
+    const t = state.dragSnap ? gridSnap(raw) : raw;
+    n.t = round6(Math.max(0, t));
+    if (n.t !== state.drag.origT) state.drag.moved = true;
+    updateStats();
+    showTip(`${fmtTime(n.t)} · 轨道 ${LANE_LABELS[n.lane]}`, e.clientX, e.clientY);
+    needsDraw = true;
+    return;
+  }
+  const L = layout();
+  if (x >= L.plotX && y >= L.lanesTop && y <= L.h) {
+    const lane = clamp(Math.floor((y - L.lanesTop) / L.laneH), 0, LANES - 1);
+    const t = L.timeAt(x);
+    state.hover = { t: clamp(t, 0, duration() || t), lane, x, y };
+    showTip(`${fmtTime(t)} · 轨道 ${LANE_LABELS[lane]}`, e.clientX, e.clientY);
+    viewCanvas.style.cursor = hitNote(x, y) ? "grab" : "crosshair";
+    needsDraw = true;
+  } else if (y < L.lanesTop && x >= L.plotX) {
+    const t = clamp(L.timeAt(x), 0, duration());
+    state.hover = { t, lane: -1, x, y };
+    showTip(fmtTime(t), e.clientX, e.clientY);
+    viewCanvas.style.cursor = "ew-resize";
+    needsDraw = true;
+  } else {
+    state.hover = null;
+    hideTip();
+    needsDraw = true;
+  }
+}
+function onUp() {
+  if (!state.drag) return;
+  const d = state.drag;
+  state.drag = null;
+  viewCanvas.style.cursor = "crosshair";
+  hideTip();
+  const changed = d.moved && JSON.stringify(state.notes) !== d.before;
+  if (changed) {
+    hist.undo.push(d.before);
+    if (hist.undo.length > 120) hist.undo.shift();
+    hist.redo.length = 0;
+    state.notes.sort((a, b) => a.t - b.t || a.lane - b.lane);
+    updateStats();
+    resetSchedulers();
+    toast("已移动音符（Ctrl+Z 撤销）");
+  }
+  needsDraw = true;
+}
+function onLeave() {
+  if (state.drag) return;
+  state.hover = null;
+  hideTip();
+  needsDraw = true;
+}
+viewCanvas.addEventListener("pointerdown", onDown);
+viewCanvas.addEventListener("pointermove", onMove);
+viewCanvas.addEventListener("pointerup", onUp);
+viewCanvas.addEventListener("pointercancel", onUp);
+viewCanvas.addEventListener("pointerleave", onLeave);
+viewCanvas.addEventListener("wheel", (e) => {
+  if (!state.notes.length && !audio.buffer) return;
+  e.preventDefault();
+  const { x } = canvasPos(e);
+  if (e.ctrlKey || e.metaKey) {
+    zoomAt(e.deltaY < 0 ? 1.16 : 1 / 1.16, x);
+  } else {
+    const L = layout();
+    const raw = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    const delta = raw * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1);
+    state.follow = false;
+    state.t0 = clamp(state.t0 + delta / L.pps, 0, maxT0(L.plotW / L.pps));
+    $("btnFollow").classList.remove("on");
+    needsDraw = true;
+  }
+  onMove(e);
+}, { passive: false });
+
+/* ================================================================== 键盘 */
+function nudgeSelected(dt) {
+  const n = state.notes.find((m) => m.id === state.sel);
+  if (!n) { toast("先选中一个音符"); return; }
+  pushUndo();
+  n.t = round6(Math.max(0, n.t + dt));
+  state.notes.sort((a, b) => a.t - b.t || a.lane - b.lane);
+  updateStats();
+  resetSchedulers();
+  needsDraw = true;
+}
+function deleteSelected() {
+  const n = state.notes.find((m) => m.id === state.sel);
+  if (!n) return;
+  pushUndo();
+  state.notes = state.notes.filter((m) => m.id !== n.id);
+  state.sel = null;
+  updateStats();
+  resetSchedulers();
+  needsDraw = true;
+}
+function selectAdjacent(dir) {
+  if (!state.notes.length) return;
+  const sorted = [...state.notes].sort((a, b) => a.t - b.t || a.lane - b.lane);
+  let idx = sorted.findIndex((n) => n.id === state.sel);
+  if (idx < 0) idx = dir > 0 ? -1 : sorted.length;
+  idx = clamp(idx + dir, 0, sorted.length - 1);
+  const n = sorted[idx];
+  state.sel = n.id;
+  revealNote(n);
+  updateStatus();
+  needsDraw = true;
+}
+function onKeyDown(e) {
+  if (e.isComposing) return;
+  const tag = e.target && e.target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (e.target && e.target.isContentEditable)) return;
+  if (document.querySelector("dialog[open]")) return;
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && e.code === "KeyZ") {
+    e.preventDefault();
+    if (e.shiftKey) redo(); else undo();
+    return;
+  }
+  if (mod && e.code === "KeyY") { e.preventDefault(); redo(); return; }
+  if (e.code === "Space") { e.preventDefault(); togglePlay(); return; }
+  if (e.key === "?") { e.preventDefault(); openHelp(); return; }
+  if (e.code === "Escape") { selectNote(null); return; }
+  if (e.code === "Home") { e.preventDefault(); seek(0); return; }
+  if (e.code === "End") { e.preventDefault(); seek(duration()); return; }
+  if (e.code === "KeyF") {
+    state.follow = !state.follow;
+    $("btnFollow").classList.toggle("on", state.follow);
+    needsDraw = true;
+    return;
+  }
+  if (e.code === "KeyM") { toggleMetro(); return; }
+  if (e.code === "KeyN") { toggleNoteClick(); return; }
+  if (e.code === "KeyP") { togglePreviewClick(); return; }
+  if (e.code === "Equal" || e.code === "NumpadAdd") { e.preventDefault(); zoomBy(1.2); return; }
+  if (e.code === "Minus" || e.code === "NumpadSubtract") { e.preventDefault(); zoomBy(1 / 1.2); return; }
+  if (e.repeat) return;
+  if (e.code === "ArrowLeft" || e.code === "ArrowRight") {
+    e.preventDefault();
+    const step = e.shiftKey ? 0.005 : 0.001;
+    if (state.sel != null) nudgeSelected(e.code === "ArrowLeft" ? -step : step);
+    else seek(position() + (e.code === "ArrowLeft" ? -1 : 1));
+    return;
+  }
+  if (e.code === "ArrowUp" || e.code === "ArrowDown") {
+    e.preventDefault();
+    selectAdjacent(e.code === "ArrowUp" ? -1 : 1);
+    return;
+  }
+  if (e.code === "Delete" || e.code === "Backspace") { e.preventDefault(); deleteSelected(); return; }
+}
+
+/* ================================================================== 试听开关 */
+function toggleMetro() {
+  state.metro = !state.metro;
+  $("btnMetro").classList.toggle("on", state.metro);
+  resetSchedulers();
+}
+function toggleNoteClick() {
+  state.noteClick = !state.noteClick;
+  $("btnNoteClick").classList.toggle("on", state.noteClick);
+  resetSchedulers();
+}
+function togglePreviewClick() {
+  state.previewClick = !state.previewClick;
+  $("btnPreviewClick").classList.toggle("on", state.previewClick);
+  resetSchedulers();
+}
+
+/* ================================================================== 对话框 */
+function openHelp() {
+  if (!$("helpDlg").open) $("helpDlg").showModal();
+}
+function closeDialog(id) {
+  const d = $(id);
+  if (d && d.open) d.close();
+}
+
+/* ================================================================== 主循环 */
+let lastNowText = "", lastTotalText = "";function updateReadout() {
+  const now = fmtTime(position());
+  if (now !== lastNowText) { $("timeNow").textContent = now; lastNowText = now; }
+  const total = fmtClock(duration());
+  if (total !== lastTotalText) {
+    $("timeTotal").textContent = audio.buffer ? `/ ${total}` : "/ 0:00";
+    lastTotalText = total;
+  }
+}
+function frame() {
+  if (audio.playing) needsDraw = true;
+  if (needsDraw) { draw(); needsDraw = false; }
+  updateReadout();
+  requestAnimationFrame(frame);
+}
+
+/* ================================================================== 装配 */
+function requireIds() {
+  const ids = [
+    "view", "canvasCard", "emptyState", "btnLoadPackEmpty", "busy", "busyText", "dragOver",
+    "sidebar", "audioFile", "chartFile", "btnLoadPack", "btnAudio", "btnChart", "fileInfo",
+    "btnFit", "btnSidebar", "btnHelp", "btnExport", "unitMs", "unitPresets", "phaseMs",
+    "phaseRange", "btnAutoPhase", "btnPhaseZero", "btnDragSnap", "gridBpm", "gridHint",
+    "offsetMs", "offsetRange", "strength", "strengthVal", "statCurrent", "statPreview",
+    "statBands", "statMerge", "btnQuantize", "btnShift", "btnUndo", "btnRedo", "quantHint",
+    "dirtyChip", "btnMetro", "btnNoteClick", "btnPreviewClick", "audioName", "chartName",
+    "noteCount", "btnRevert", "btnExport2", "btnPlay", "timeNow", "timeTotal", "speed",
+    "volume", "btnFollow", "btnZoomOut", "btnZoomIn", "status", "helpDlg", "tip", "toast",
+  ];
+  const missing = ids.filter((id) => !$(id));
+  if (missing.length) throw new Error(`HTML 缺少元素：#${missing.join(", #")}`);
+}
+function bind() {
+  $("audioFile").addEventListener("change", (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (f) loadAudioFile(f);
+  });
+  $("chartFile").addEventListener("change", (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (f) loadChartFile(f);
+  });
+  $("btnAudio").addEventListener("click", () => $("audioFile").click());
+  $("btnChart").addEventListener("click", () => $("chartFile").click());
+  $("btnLoadPack").addEventListener("click", loadPackAndFit);
+  $("btnLoadPackEmpty").addEventListener("click", loadPackAndFit);
+  $("btnExport").addEventListener("click", exportChart);
+  $("btnExport2").addEventListener("click", exportChart);
+  $("btnHelp").addEventListener("click", openHelp);
+  $("btnFit").addEventListener("click", fitView);
+  $("btnPlay").addEventListener("click", togglePlay);
+  $("speed").addEventListener("change", (e) => { setSpeed(+e.target.value); e.target.blur(); });
+  $("volume").addEventListener("input", (e) => setVolume(+e.target.value));
+  $("volume").addEventListener("change", (e) => e.target.blur());
+  $("btnFollow").addEventListener("click", () => {
+    state.follow = !state.follow;
+    $("btnFollow").classList.toggle("on", state.follow);
+    needsDraw = true;
+  });
+  $("btnZoomIn").addEventListener("click", () => zoomBy(1.25));
+  $("btnZoomOut").addEventListener("click", () => zoomBy(1 / 1.25));
+  $("btnSidebar").addEventListener("click", () => {
+    if (window.matchMedia("(max-width: 900px)").matches) {
+      $("sidebar").classList.toggle("open");
+    } else {
+      document.body.classList.toggle("sidebar-hidden");
+      resize();
+    }
+  });
+
+  $("unitMs").addEventListener("change", (e) => setUnit(+e.target.value / 1000));
+  [...$("unitPresets").children].forEach((b) => {
+    b.addEventListener("click", () => setUnit(+b.dataset.unit / 1000));
+  });
+  $("phaseMs").addEventListener("change", (e) => setPhase(+e.target.value / 1000));
+  $("phaseRange").addEventListener("input", (e) => setPhase(+e.target.value / 1000));
+  $("btnAutoPhase").addEventListener("click", () => { autoPhase(); updateStats(); resetSchedulers(); needsDraw = true; });
+  $("btnPhaseZero").addEventListener("click", () => { setPhase(0); });
+  $("btnDragSnap").addEventListener("click", () => {
+    state.dragSnap = !state.dragSnap;
+    $("btnDragSnap").classList.toggle("on", state.dragSnap);
+  });
+
+  $("offsetMs").addEventListener("change", (e) => setOffset(+e.target.value));
+  $("offsetRange").addEventListener("input", (e) => setOffset(+e.target.value));
+  document.querySelectorAll("[data-offset]").forEach((b) => {
+    b.addEventListener("click", () => setOffset(state.offset * 1000 + +b.dataset.offset));
+  });
+  $("strength").addEventListener("input", (e) => setStrength(+e.target.value));
+  $("btnQuantize").addEventListener("click", applyQuantize);
+  $("btnShift").addEventListener("click", applyShift);
+  $("btnUndo").addEventListener("click", undo);
+  $("btnRedo").addEventListener("click", redo);
+  $("btnRevert").addEventListener("click", armRevert);
+  $("btnMetro").addEventListener("click", toggleMetro);
+  $("btnNoteClick").addEventListener("click", toggleNoteClick);
+  $("btnPreviewClick").addEventListener("click", togglePreviewClick);
+
+  document.querySelectorAll("[data-close]").forEach((b) => {
+    b.addEventListener("click", () => closeDialog(b.dataset.close));
+  });
+  document.querySelectorAll("dialog").forEach((d) => {
+    d.addEventListener("click", (e) => { if (e.target === d) d.close(); });
+  });
+  window.addEventListener("keydown", onKeyDown);
+
+  let dragDepth = 0;
+  window.addEventListener("dragenter", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth++;
+    document.body.classList.add("dragging");
+  });
+  window.addEventListener("dragover", (e) => { if (hasFiles(e)) e.preventDefault(); });
+  window.addEventListener("dragleave", () => {
+    if (!document.body.classList.contains("dragging")) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) document.body.classList.remove("dragging");
+  });
+  window.addEventListener("drop", async (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    document.body.classList.remove("dragging");
+    const files = [...(e.dataTransfer.files || [])];
+    const json = files.find((f) => /\.json$/i.test(f.name));
+    const audioFile = files.find((f) => !/\.json$/i.test(f.name));
+    if (audioFile) await loadAudioFile(audioFile);
+    if (json) await loadChartFile(json);
+  });
+}
+function hasFiles(e) {
+  const types = e.dataTransfer && e.dataTransfer.types;
+  if (!types) return false;
+  for (const t of types) if (t === "Files") return true;
+  return false;
+}
+
+function initialize() {
+  requireIds();
+  setVolume(state.volume);
+  $("speed").value = "1";
+  syncGridUI();
+  syncPhaseRange();
+  syncPhaseUI();
+  syncOffsetUI();
+  $("strengthVal").textContent = "100%";
+  $("btnMetro").classList.toggle("on", state.metro);
+  $("btnNoteClick").classList.toggle("on", state.noteClick);
+  $("btnPreviewClick").classList.toggle("on", state.previewClick);
+  $("btnDragSnap").classList.toggle("on", state.dragSnap);
+  updateStats();
+  bind();
+  resize();
+  frame();
+  window.__align = {
+    state, audio, hist,
+    chartText, targetFor, gridSnap, applyQuantize, applyShift, undo, redo,
+    autoPhase, loadCurrentPack, parseChart, setChartData, setAudioBuffer,
+    layout, noteScreen(id) {
+      const n = state.notes.find((m) => m.id === id);
+      if (!n) return null;
+      const L = layout();
+      const r = viewCanvas.getBoundingClientRect();
+      return { x: r.left + L.xOf(n.t), y: r.top + L.laneCenter(n.lane) };
+    },
+  };
+}
+
+try {
+  initialize();
+} catch (err) {
+  console.error("[align] init failed", err);
+  window.__errors.push(String(err && err.message ? err.message : err));
+  try { toast(`界面初始化失败：${err.message}`, "error", 8000); } catch (e) { /* ignore */ }
+}
+</script>
+</body>
+</html>
