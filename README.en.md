@@ -221,23 +221,30 @@ version control; the audio is merged in when building the `.tmbp`.
 
 For hands-on charting, open **`tools/chart_studio.html`** — a zero-dependency,
 single-file web tool (Chrome/Edge recommended). Audio plays through WebAudio
-on the browser's audio thread, so page jank never affects the transport.
+on the browser's audio thread, so page jank never affects the transport. The
+layout is a canvas plus a song/selection sidebar and a transport dock: the
+overview strip scrubs, while the beat grid, waveform, per-lane note counts and
+BPM stay in view.
 
-- **Latency calibration** — a built-in metronome samples 16 taps and takes
-  the median, compensating output latency + reaction time in one number;
-  at reduced playback speed the reaction part scales with the rate, so
-  notes always land where you heard them.
+- **Loading** — pick a file in the top bar or drop audio onto the window; with
+  no material, *Demo* synthesises 60 seconds of music at 120 BPM.
+- **Latency calibration** — 16 metronome clicks, median tap offset, compensating
+  output latency + reaction time in one number; at reduced speed the reaction
+  part scales with the rate. Notes placed while paused sit exactly on the
+  playhead instead of being shifted by the reaction delay.
 - **Play mode** — the same `A S D J K L` six lanes as the game; tap while
-  listening to place notes, `Space` pauses/resumes anytime (tapping while
-  paused places at the exact current position), 0.25×–1× speed, optional
-  metronome and grid snapping.
-- **Edit mode** (`Tab`) — piano roll + waveform: click to select, drag to
-  move in time/lane, ±10/50 ms nudges, delete, `Ctrl+Z` undo; a double tap
-  is `L` on a selected note then click the partner — both align to one
-  timestamp and edit together (`U` unlinks).
-- **Import/export** — `chart.json` / `manifest.json` feed
-  `make_pack.py --src` directly; charts can be re-imported. Drafts
-  autosave in the browser per audio file.
+  listening, `Space` pauses/resumes, 0.25×–1× speed, metronome, key click and
+  snapping.
+- **Edit mode** (`Tab`) — piano roll + waveform + bar/beat grid: click to
+  select, drag to move in time and lane, `↑/↓` changes lane, `←/→` ±10 ms
+  (Shift ±50 ms), `Del` deletes, `Ctrl+Z` / `Ctrl+Shift+Z` undo/redo,
+  `Ctrl+wheel` zooms. A double tap is `L` on a selected note then click the
+  partner — both align to one timestamp and edit together (`U` unlinks).
+- **Song card** — metadata, BPM (press `T` to tap tempo) and per-lane note
+  density; `chart.json` / `manifest.json` export feed `make_pack.py --src`
+  directly, and existing charts can be imported for further editing.
+- **Drafts** — autosaved in the browser per audio file, including metadata,
+  BPM, snapping and double-tap groups.
 
 Bilibili `.m4s` segments cannot be decoded by browsers — remux first:
 `ffmpeg -i in.m4s -c:a copy out.m4a`.
