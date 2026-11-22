@@ -61,10 +61,13 @@ def _get_pool():
 class Voice:
     def __init__(self, segments: List[Segment], release: Optional[array] = None,
                  sustain: bool = False, gain: float = 1.0,
-                 steady: Optional[array] = None):
+                 steady: Optional[array] = None, start: int = 0):
         self._segments = segments
         self._idx = 0
-        self._pos = 0
+        self._pos = start
+        # Frames actually consumed from the segments (mixer thread only);
+        # external PCM playback reads this to know where the song is.
+        self.consumed = 0
         self._release = release
         self._sustain = sustain
         self._steady = steady
@@ -121,7 +124,15 @@ class Voice:
                 continue
             avail = len(buf) - self._pos
             take = min(n - filled, avail)
-            out[filled:filled + take] = buf[self._pos:self._pos + take]
+            chunk = buf[self._pos:self._pos + take]
+            if chunk.typecode != out.typecode:
+                # External PCM arrives as raw int16 frames (±32768); the mixer
+                # sums float32 normalized to ±1. Without the scale every
+                # sample lands far beyond the limiter knee: one chunk after
+                # any silence (the mix gain back at 1.0) plays as a square
+                # wave. 512 frames per pull — the conversion is noise.
+                chunk = array(out.typecode, [v / 32768.0 for v in chunk])
+            out[filled:filled + take] = chunk
             self._pos += take
             filled += take
             if loop:
@@ -132,6 +143,7 @@ class Voice:
                 else:
                     self._idx += 1
                     self._pos = 0
+        self.consumed += filled
         if self._idx >= len(self._segments):
             self.done = True
         if self._fade_left > 0:
@@ -476,6 +488,28 @@ class AudioEngine:
             self._next_id += 1
             self._voices[vid] = v
         return vid
+
+    def play_pcm(self, pcm, gain: float = 1.0, start: int = 0) -> int:
+        """Play a raw mono float/int sample buffer (external song audio).
+
+        The buffer is shared, never copied or mutated; `start` resumes from a
+        frame offset. Returns the voice id for stop_voice/voice_consumed.
+        """
+        return self._add(Voice([(pcm, False)], gain=gain, start=start))
+
+    def stop_voice(self, vid: int, fade_ms: float = 120.0) -> None:
+        """Fade one voice out and detach it (external music pause/stop)."""
+        with self._lock:
+            v = self._voices.pop(vid, None)
+            if v is not None and fade_ms > 0:
+                v.fade_out(max(1, int(self.sr * fade_ms / 1000)))
+                self._fading.append(v)
+
+    def voice_consumed(self, vid: int) -> int:
+        """Frames the mixer has pulled from this voice, or -1 if it is gone."""
+        with self._lock:
+            v = self._voices.get(vid)
+        return v.consumed if v is not None else -1
 
     def note_off(self, vid: int) -> None:
         with self._lock:

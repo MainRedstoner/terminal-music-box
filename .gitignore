@@ -14,3 +14,4 @@ venv/
 .codebuddy/
 .agents/
 .pytest_cache/
+external_songs/

@@ -23,10 +23,45 @@ PALETTE = [C.cyan, C.green, C.yellow, C.magenta, C.blue, C.pink]
 
 
 class RhythmGameScreen(Screen):
-    def enter(self, song: Optional[str] = None, **kw) -> None:
+    def enter(self, song: Optional[str] = None, pack=None, **kw) -> None:
+        if pack is not None:
+            self._enter_pack(pack)
+            return
         self.song_id = song or songs.RHYTHM_ORDER[0]
         self.song = songs.get_song(self.song_id)
         self.beatmap = songs.get_beatmap(self.song_id)
+        self.pack = None
+        self._init_gameplay()
+        # The melody auto-plays for the whole run; hits are silent judgment
+        # only. The player is positioned so each note sounds exactly when its
+        # chart note crosses the judgment line (chart = song time + lead_in).
+        # A song may lock its timbre (canon always plays the didgeridoo,
+        # whatever the free-play keyboard is set to); otherwise the user's
+        # choice stands. Preload the score's keys in the background so the
+        # auto-play never stalls on a first-use render mid-song.
+        self.timbre = self.song.timbre or self.config.timbre
+        self.audio.preload(self.timbre,
+                           sorted({n.midi for n in self.song.notes}))
+        vol, length = self.config.sound_params(self.timbre)
+        self.player = songs.SongPlayer(self.audio, self.song, self.timbre,
+                                       vol=vol, length=length)
+        self.player.start()
+        self.player.pos = -self.beatmap.lead_in
+
+    def _enter_pack(self, pack) -> None:
+        """An external pack: the decoded audio file IS the melody."""
+        self.song_id = pack.id
+        self.song = pack.song()
+        self.beatmap = pack.beatmap()
+        self.pack = pack
+        self._init_gameplay()
+        # No synth notes exist here, so there is nothing to preload; the
+        # pack's decoded PCM launches as the first falling note leaves the
+        # top (the chart lead-in). One decoded pack stays in RAM at a time.
+        self.timbre = self.config.timbre
+        self.player = self.app.external.player_for(pack, self.audio)
+
+    def _init_gameplay(self) -> None:
         self.notes = self.beatmap.notes
         keys = list(self.config.rhythm_keys)
         if len(keys) != LANES:
@@ -55,21 +90,6 @@ class RhythmGameScreen(Screen):
         self.pause_index = 0
         self.grade = "D"
         self.state = "countdown"
-        # The melody auto-plays for the whole run; hits are silent judgment
-        # only. The player is positioned so each note sounds exactly when its
-        # chart note crosses the judgment line (chart = song time + lead_in).
-        # A song may lock its timbre (canon always plays the didgeridoo,
-        # whatever the free-play keyboard is set to); otherwise the user's
-        # choice stands. Preload the score's keys in the background so the
-        # auto-play never stalls on a first-use render mid-song.
-        self.timbre = self.song.timbre or self.config.timbre
-        self.audio.preload(self.timbre,
-                           sorted({n.midi for n in self.song.notes}))
-        vol, length = self.config.sound_params(self.timbre)
-        self.player = songs.SongPlayer(self.audio, self.song, self.timbre,
-                                       vol=vol, length=length)
-        self.player.start()
-        self.player.pos = -self.beatmap.lead_in
 
     def exit(self) -> None:
         try:
@@ -126,6 +146,9 @@ class RhythmGameScreen(Screen):
     def _pause(self) -> None:
         self.key_down.clear()
         self.pause_index = 0
+        # Built-in melodies freeze with the song clock; pack audio must
+        # actually stop, it would keep sounding otherwise.
+        self.player.pause()
         self.state = "pause"
 
     def _resume(self) -> None:
@@ -137,8 +160,7 @@ class RhythmGameScreen(Screen):
         p = self.player
         if p is None:
             return
-        p.pos = self.song_time - self.beatmap.lead_in
-        p.update(0.0)
+        p.sync(self.song_time, self.beatmap.lead_in)
 
     def _finish(self) -> None:
         a = self._accuracy()
@@ -214,6 +236,8 @@ class RhythmGameScreen(Screen):
             self.countdown -= dt
             if self.countdown <= 0:
                 self.state = "play"
+                # Pack audio resumes exactly here, not during the countdown.
+                self.player.resume()
             return
         if self.state != "play":
             return

@@ -21,7 +21,9 @@ Implements [issue #1 — software development plan](https://github.com/MainRedst
   the play keys are muted (only the auto-play sounds) and the song button appears.
 - **Rhythm Game** — vertically falling notes, a judgment line,
   Perfect / Good / Miss judgment with effects, live score & combo, latency
-  calibration, and rebindable keys.
+  calibration, and rebindable keys. The song list is grouped into
+  **Built-in Music / External Music**; external packs (chart + audio bundled
+  into one `.tmbp` file) dropped into `external_songs/` show up and play.
 - **Audio** — a real-time polyphonic mixer streaming to ALSA (`aplay`) or
   PulseAudio/PipeWire (`pacat`/`paplay`) on Linux, `winmm` on Windows, and WAV/null
   backends for headless testing. Timbres are pre-rendered in a background thread
@@ -172,6 +174,74 @@ outer two take only isolated long notes, no lane repeats on three consecutive
 onsets, and chords are mirrored across the middle; a fast right-hand passage lends
 one note to the left hand after six notes, so two fingers never machine-gun a run.
 
+## External Song Packs
+
+The rhythm game can load custom charts: a chart and its audio bundled into
+**one `.tmbp` file** (a zip holding `manifest.json`, `chart.json` and a
+compressed audio track). Drop it into `external_songs/` next to the package
+and it appears under the "External Music" group in the song list. That
+directory is excluded via `.gitignore` — external audio is usually
+copyrighted material and must not enter version control.
+
+- **Playback**: entering the song decodes the pack audio to 44.1 kHz mono PCM
+  with ffmpeg (a 4-minute song is about 20 MB of RAM) and streams it through
+  the existing mixer as one long voice; pause/resume line up exactly, and on
+  slow devices the audio re-aligns once it drifts more than 80 ms from the
+  song clock. Packs whose audio is a plain PCM WAV play without ffmpeg.
+- **Packing**: `tools/make_pack.py` compresses the audio with ffmpeg to mono
+  Opus 96 kbps while building the pack (falling back to the built-in AAC
+  encoder when libopus is unavailable) — 6.3 MB of source audio becomes a
+  2.9 MB pack, which also cuts decode memory on a 1 GB Raspberry Pi.
+
+  ```bash
+  python tools/make_pack.py --src packs/my_song --audio audio.m4s
+  ```
+
+- **Charting**: `tools/chart_canon_style.py` detects onsets from the melody
+  band (250-1200 Hz: voice + piano) — drums and bass are excluded, so the
+  chart follows the tune, not the drum pulse. Notes keep their performed
+  onset times (this concert recording breathes; no global quantise grid),
+  and the lanes are planned with the same two-hand toolbox the built-in
+  charts use (`tmb/charts.py`): pitch bands cut by note count, dense runs
+  cycling the four inner lanes (`S D J K`), no repeated key on consecutive
+  onsets, one-hand blocks crossed to the other hand, and phrase accents as
+  mirrored double taps (A-L / S-K / D-J):
+
+  ```bash
+  python tools/chart_canon_style.py --audio audio.m4s \
+      --id i_never_forgot --title-zh 我不曾忘记 --title-en "To the Traveler" \
+      --out-dir packs/i_never_forgot
+  python tools/make_pack.py --src packs/i_never_forgot --audio audio.m4s
+  ```
+
+`packs/` keeps chart sources (`chart.json` + `manifest.json`, no audio) in
+version control; the audio is merged in when building the `.tmbp`.
+
+### Manual Chart Studio
+
+For hands-on charting, open **`tools/chart_studio.html`** — a zero-dependency,
+single-file web tool (Chrome/Edge recommended). Audio plays through WebAudio
+on the browser's audio thread, so page jank never affects the transport.
+
+- **Latency calibration** — a built-in metronome samples 16 taps and takes
+  the median, compensating output latency + reaction time in one number;
+  at reduced playback speed the reaction part scales with the rate, so
+  notes always land where you heard them.
+- **Play mode** — the same `A S D J K L` six lanes as the game; tap while
+  listening to place notes, `Space` pauses/resumes anytime (tapping while
+  paused places at the exact current position), 0.25×–1× speed, optional
+  metronome and grid snapping.
+- **Edit mode** (`Tab`) — piano roll + waveform: click to select, drag to
+  move in time/lane, ±10/50 ms nudges, delete, `Ctrl+Z` undo; a double tap
+  is `L` on a selected note then click the partner — both align to one
+  timestamp and edit together (`U` unlinks).
+- **Import/export** — `chart.json` / `manifest.json` feed
+  `make_pack.py --src` directly; charts can be re-imported. Drafts
+  autosave in the browser per audio file.
+
+Bilibili `.m4s` segments cannot be decoded by browsers — remux first:
+`ffmpeg -i in.m4s -c:a copy out.m4a`.
+
 ## Architecture
 
 ```
@@ -191,8 +261,12 @@ tmb/
     engine.py      polyphonic mixer thread + voices
     synth.py       procedural Minecraft note-block timbres
   songs.py         melodies, beatmaps, pausable song player
-  charts.py        lane planning: pitch bands, fingering shapes, corrections
+  external.py      external song packs (.tmbp): parsing, ffmpeg decode, PCM player
   screens/         main_menu, freeplay, rhythm, rhythm_game, song_select
+tools/
+  make_pack.py     pack builder: ffmpeg-compress audio, assemble a .tmbp
+  chart_canon_style.py  Canon-style auto charting (melody-band onsets + two-hand planning)
+  chart_studio.html     manual chart studio (standalone web page, zero dependencies)
 ```
 
 ### Cross-platform input

@@ -70,6 +70,15 @@ class HeadlessCase(unittest.TestCase):
 
     def setUp(self):
         self.config_file = isolated_config(self)
+        # External packs are kept out of the repo's external_songs/ so the
+        # suite stays deterministic wherever real packs are installed.
+        tmp = tempfile.TemporaryDirectory()
+        self.external_dir = os.path.join(tmp.name, "external_songs")
+        self.addCleanup(tmp.cleanup)
+        patcher = mock.patch("tmb.external.external_dir",
+                             return_value=self.external_dir)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.cfg = Config(mode=self.mode, timbre=self.timbre)
         self.term = HeadlessTerminal(self.width, self.height)
         self.engine = AudioEngine(backend=NullBackend(), realtime=False)

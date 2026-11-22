@@ -17,7 +17,9 @@
 - **胎教模式** — 自动播放轻柔旋律;只有在 2 秒内按下任意演奏键,音乐才继续,
   否则暂停。开启后演奏键静音,只保留自动播放的声音,选歌按钮也随之出现。
 - **音游模式** — 竖直下落的音符、判定线、完美/良好/失败判定与特效、
-  实时分数与连击、延迟校正、可自定义键位。
+  实时分数与连击、延迟校正、可自定义键位。曲目列表按 **内置音乐 / 外部音乐**
+  分组展示；外部音乐包（谱面 + 音频打包成一个 `.tmbp` 文件）放入
+  `external_songs/` 目录即可加载游玩。
 - **音频** — 实时多声部混音器:Linux 下流式输出到 ALSA(`aplay`)或
   PulseAudio/PipeWire(`pacat`/`paplay`),Windows 下使用 `winmm`,另提供 WAV/null
   后端用于无头测试。音色在启动与切换时后台预加载,首次弹奏不卡顿;
@@ -137,6 +139,63 @@ Z X C V B N M   —— 低音 (C3..B3)
 的 WoO 59 完整钢琴谱(Breitkopf & Härtel,1888),展开两组印刷反复;排版者
 Stelios Samelis 已将该版本贡献至公有领域。音游谱面以右手最高声部为主音,微时值装饰音仅保留在自动播放中;八分音符及更快的音符走中间四轨,外侧两轨只承接稀疏长音,同一轨道不会连续出现三个音符;和弦与每四小节的第一拍加入镜像双押;右手高音段连续六个快速音符后会借一个音给左手,避免两根手指在六连音上连打。
 
+## 外部音乐包
+
+音游模式可以加载自制谱面:谱面与音频打包成**一个 `.tmbp` 文件**(zip 容器,
+内含 `manifest.json`、`chart.json` 与压缩音频),放入仓库根目录的
+`external_songs/` 后,音游曲目列表的"外部音乐"分组即会出现对应条目。
+该目录已被 `.gitignore` 排除——外部音频往往是受版权保护的素材,不应进入版本库。
+
+- **播放**:进入曲目时用 ffmpeg 把包内音频解码为 44.1 kHz 单声道 PCM
+  (约 4 分钟歌曲 ≈ 20 MB 内存),经由现有混音器作为一条长音轨播放;
+  暂停/继续精确衔接,慢设备上音画漂移超过 80 ms 时自动对齐。纯 PCM WAV
+  打包的音乐包无需 ffmpeg 即可播放。
+- **打包**:`tools/make_pack.py` 在打包时用 ffmpeg 把音频压缩为单声道
+  Opus 96 kbps(无 libopus 时回退内置 AAC),2.9 MB 的示例包对应
+  6.3 MB 原始音频,压缩也显著降低了树莓派上的解码内存占用。
+
+  ```bash
+  python tools/make_pack.py --src packs/my_song --audio audio.m4s
+  ```
+
+- **作谱**:`tools/chart_canon_style.py` 从旋律频段(250-1200 Hz,人声+钢琴)
+  做起始检测——鼓组与贝斯被排除在外,音符跟随的是"调子"而非鼓点;音符
+  保持在检测到的演奏时间上(现场演奏有弹性速度,不做全局网格量化),轨道
+  规划使用与内置谱面相同的双手工具箱 `tmb/charts.py`:按音符数切音区、
+  密集乐句轮换中间四轨(`S D J K`)、同一轨道不连击、单手长串自动换手、
+  乐句重音镜像双押(A-L / S-K / D-J):
+
+  ```bash
+  python tools/chart_canon_style.py --audio audio.m4s \
+      --id i_never_forgot --title-zh 我不曾忘记 --title-en "To the Traveler" \
+      --out-dir packs/i_never_forgot
+  python tools/make_pack.py --src packs/i_never_forgot --audio audio.m4s
+  ```
+
+`packs/` 目录存放谱面源文件(`chart.json` + `manifest.json`,不含音频),
+便于在版本库中保存与迭代谱面;构建 `.tmbp` 时再把音频合并进去。
+
+### 手动作谱台
+
+不想依赖自动分析时,用 **`tools/chart_studio.html`** 手工作谱:零依赖单文件
+网页工具,浏览器直接打开即可(建议 Chrome/Edge)。音频经 WebAudio 在浏览器
+音频线程播放,页面卡顿不影响走带。
+
+- **延迟校准**——内置节拍器采样 16 拍取中位数,一次性补偿「音频输出延迟 +
+  反应延迟」;降速作谱时反应分量按速率缩放,音符始终落在你听到的位置。
+- **演奏模式**——与游戏一致的 `A S D J K L` 六轨,边听边按键放音符,
+  `空格` 随时暂停/继续(暂停中按键 = 在当前位置精确放音符),支持 0.25×–1×
+  变速、可选节拍器与网格吸附。
+- **编辑模式**(`Tab` 切换)——钢琴卷帘 + 波形图:点选、拖动改时间/轨道、
+  ±10/50 ms 微调、删除、`Ctrl+Z` 撤销;双押 = 选中后按 `L` 点另一个音符,
+  两音符对齐同一时刻并联动编辑(`U` 解除)。
+- **导入导出**——导出 `chart.json` / `manifest.json` 直接对接
+  `make_pack.py --src` 打包;也支持导入继续编辑。草稿按「文件名+时长」
+  自动保存在浏览器里。
+
+B 站 `.m4s` 分段容器浏览器解不了,先转封装:
+`ffmpeg -i in.m4s -c:a copy out.m4a`。
+
 ## 架构
 
 ```
@@ -156,8 +215,12 @@ tmb/
     engine.py      多声部混音线程 + 声部管理
     synth.py       Minecraft 音符盒音色程序化合成
   songs.py         旋律、谱面、可暂停的歌曲播放器
-  charts.py        键位规划:音高分带、手法型、同轨/同手修正、双押配对
+  external.py      外部音乐包(.tmbp):解析、ffmpeg 解码、PCM 播放器
   screens/         main_menu、freeplay、rhythm、rhythm_game、song_select
+tools/
+  make_pack.py     打包工具:ffmpeg 压缩音频并合成 .tmbp
+  chart_canon_style.py  卡农风格自动作谱(旋律频段起始检测 + 双手规划)
+  chart_studio.html     手动作谱台(独立网页,零依赖)
 ```
 
 ### 跨平台输入

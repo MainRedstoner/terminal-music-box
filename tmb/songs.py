@@ -276,6 +276,16 @@ class SongPlayer:
     def set_timbre(self, tid: str) -> None:
         self.timbre = tid
 
+    def sync(self, song_time: float, lead_in: float = 0.0) -> None:
+        """Reposition to the game clock and fire notes that crossed it.
+
+        The rhythm screen calls this every play frame; `lead_in` converts the
+        chart clock (song time + lead_in) back to melody time. Pack playback
+        exposes the same method, so the screen treats both players alike.
+        """
+        self.pos = song_time - lead_in
+        self.update(0.0)
+
     def update(self, dt: float) -> None:
         if not self.playing or self.finished:
             return

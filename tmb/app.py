@@ -10,6 +10,7 @@ from .events import KeyEvent, MouseEvent, ResizeEvent
 from .theme import theme_for
 from .ui import draw_loading_overlay
 from .audio.engine import AudioEngine
+from . import external
 
 FRAME = 1.0 / 60.0  # frame budget: pacing pins the cadence to this instead of
                     # to the input wait plus however long a frame happened to take
@@ -24,6 +25,7 @@ class App:
         self.audio = audio
         self.config = config if config is not None else Config.load()
         self.theme = theme_for(self.config.mode)
+        self.external = external.Library(engine_sr=audio.sr)
         self._factories: Dict[str, Callable] = {}
         self._screens: Dict[str, object] = {}
         self.current = None
@@ -129,6 +131,8 @@ class App:
         if not self.audio.realtime:
             return
         active, done, total = self.audio.preload_status()
+        if not active:
+            active, done, total = self.external.status()
         if active:
             draw_loading_overlay(scr, self.theme, done, total)
 

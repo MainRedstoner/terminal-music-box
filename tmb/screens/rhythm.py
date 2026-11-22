@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from statistics import median
 
-from ..ansi import Screen as Buffer, C
+from ..ansi import Screen as Buffer, C, text_width
 from ..events import (KeyEvent, ENTER, SPACE, TAB, is_exit,
                       UP, DOWN, LEFT, RIGHT)
 from ..ui import center_text, draw_box, draw_button, draw_menu_row
@@ -12,19 +12,44 @@ from .. import songs
 
 
 class RhythmMenuScreen(Screen):
-    """Two panes: a wide song selector and a compact settings column."""
+    """Two panes: a wide song selector and a compact settings column.
+
+    The song list is grouped under 内置音乐 / 外部音乐 headers; the external
+    packs below are .tmbp files (chart + audio) from external_songs/ and are
+    gated on their audio being decoded, like built-in songs gate on buffer
+    pre-rendering.
+    """
 
     def enter(self, **kw):
         self.focus = 0  # 0 = songs, 1 = functions
         self.song_index = 0
         self.function_index = 0
-        self.song_ids = list(songs.RHYTHM_ORDER)
         self.function_ids = ["rhythm_calib", "rhythm_keys"]
         self._pending_song = None
+        self._pending_pack = None
+        self.notice = ""
+        self.app.external.refresh()
+        self._rebuild()
+
+    def _rebuild(self) -> None:
+        ext = self.app.external
+        rows: list = [("header", "rhythm.builtin")]
+        rows += [("song", sid, None) for sid in songs.RHYTHM_ORDER]
+        rows.append(("header", "rhythm.external"))
+        if ext.packs:
+            rows += [("song", pack.id, pack) for pack in ext.packs]
+        else:
+            rows.append(("hint", "rhythm.external_empty"))
+        self.rows = rows
+        self.song_rows = [i for i, r in enumerate(rows) if r[0] == "song"]
+        self.song_ids = [rows[i][1] for i in self.song_rows]
+        self.row_of_song = {row: idx for idx, row in enumerate(self.song_rows)}
+        self.song_index = min(self.song_index, max(0, len(self.song_rows) - 1))
+        self.row_scroll = 0
 
     def _move(self, step: int) -> None:
         if self.focus == 0:
-            n = len(self.song_ids)
+            n = len(self.song_rows)
             if n:
                 self.song_index = (self.song_index + step) % n
         else:
@@ -34,16 +59,31 @@ class RhythmMenuScreen(Screen):
     def _start_song(self, index: int) -> None:
         self.focus = 0
         self.song_index = index
-        if not self.song_ids:
+        if not self.song_rows:
             return
-        sid = self.song_ids[index]
-        if self._song_ready(sid):
+        sid, pack = self.rows[self.song_rows[index]][1:]
+        if pack is None:
+            if self._song_ready(sid):
+                self._pending_song = None
+                self.app.navigate("rhythm_game", song=sid)
+                return
+            self._pending_song = sid
+            timbre, midis = self._song_audio(sid)
+            self.audio.preload(timbre, midis)
+            return
+        ext = self.app.external
+        if not ext.can_decode(pack):
+            self.notice = self.theme.t("rhythm.need_ffmpeg")
+            return
+        self.notice = ""
+        if ext.is_ready(pack.id):
             self._pending_song = None
-            self.app.navigate("rhythm_game", song=sid)
+            self._pending_pack = None
+            self.app.navigate("rhythm_game", song=pack.id, pack=pack)
             return
-        self._pending_song = sid
-        timbre, midis = self._song_audio(sid)
-        self.audio.preload(timbre, midis)
+        self._pending_song = pack.id
+        self._pending_pack = pack
+        ext.start_decode(pack.id)
 
     def _song_audio(self, sid: str):
         song = songs.SONGS[sid]
@@ -63,29 +103,50 @@ class RhythmMenuScreen(Screen):
         sid = self._pending_song
         if sid is None:
             return
-        if self._song_ready(sid):
-            self._pending_song = None
-            self.app.navigate("rhythm_game", song=sid)
+        pack = self._pending_pack
+        if pack is None:
+            if self._song_ready(sid):
+                self._pending_song = None
+                self.app.navigate("rhythm_game", song=sid)
+                return
+            # Healing: if the last request ran to completion but the gate is
+            # still shut, kick preload again instead of waiting forever.
+            active, done, total = self.audio.preload_status()
+            if not active and total > 0 and done >= total:
+                timbre, midis = self._song_audio(sid)
+                self.audio.preload(timbre, midis)
             return
-        # Healing: if the last request ran to completion but the gate is still
-        # shut, kick preload again instead of waiting forever.
-        active, done, total = self.audio.preload_status()
-        if not active and total > 0 and done >= total:
-            timbre, midis = self._song_audio(sid)
-            self.audio.preload(timbre, midis)
+        ext = self.app.external
+        if ext.is_ready(pack.id):
+            self._pending_song = None
+            self._pending_pack = None
+            self.app.navigate("rhythm_game", song=pack.id, pack=pack)
+            return
+        err = ext.error(pack.id)
+        if err:
+            self._pending_song = None
+            self._pending_pack = None
+            self.notice = self.theme.t("rhythm.external_error", msg=err)
+            return
+        # Healing: a decode request that neither finished nor errored is dead.
+        active, _done, _total = ext.status()
+        if not active:
+            ext.start_decode(pack.id)
 
     def exit(self) -> None:
         self._pending_song = None
+        self._pending_pack = None
 
     def _start_function(self, index: int) -> None:
         self.focus = 1
         self.function_index = index
         self._pending_song = None
+        self._pending_pack = None
         self.app.navigate(self.function_ids[index])
 
     def _activate(self) -> None:
         if self.focus == 0:
-            if self.song_ids:
+            if self.song_rows:
                 self._start_song(self.song_index)
         else:
             self._start_function(self.function_index)
@@ -104,6 +165,15 @@ class RhythmMenuScreen(Screen):
             self._move(1)
         elif k in (ENTER, SPACE):
             self._activate()
+
+    # Drawing -----------------------------------------------------------------
+
+    def _draw_header(self, scr: Buffer, x: int, y: int, w: int,
+                     key: str, th) -> None:
+        h = th.border.h
+        line = "%s %s " % (h * 2, th.t(key))
+        rest = max(0, w - text_width(line))
+        scr.text(x, y, line + h * rest, C.yellow, None, True)
 
     def draw(self, scr: Buffer) -> None:
         self.hits.clear()
@@ -137,19 +207,30 @@ class RhythmMenuScreen(Screen):
                  title_fg=C.yellow if not song_active else C.gray)
 
         lang = th.lang
-        start = max(0, self.song_index - rows + 1) if rows else 0
+        sel_row = self.song_rows[self.song_index] if self.song_rows else 0
+        if sel_row < self.row_scroll:
+            self.row_scroll = sel_row
+        if rows and sel_row >= self.row_scroll + rows:
+            self.row_scroll = sel_row - rows + 1
         for r in range(rows):
-            i = start + r
-            if i >= len(self.song_ids):
+            i = self.row_scroll + r
+            if i >= len(self.rows):
                 break
-            sid = self.song_ids[i]
-            draw_menu_row(
-                scr, x + 1, top + 1 + r, song_w - 2,
-                songs.SONGS[sid].title(lang),
-                song_active and i == self.song_index, th,
-                fg=C.white if song_active else C.gray, hits=self.hits,
-                action=(lambda idx=i: self._start_song(idx)),
-            )
+            y = top + 1 + r
+            row = self.rows[i]
+            if row[0] == "header":
+                self._draw_header(scr, x + 1, y, song_w - 2, row[1], th)
+            elif row[0] == "hint":
+                scr.text(x + 3, y, "  " + th.t(row[1]), C.dim)
+            else:
+                idx = self.row_of_song[i]
+                item = row[2] or songs.SONGS[row[1]]
+                draw_menu_row(
+                    scr, x + 1, y, song_w - 2, item.title(lang),
+                    song_active and idx == self.song_index, th,
+                    fg=C.white if song_active else C.gray, hits=self.hits,
+                    action=(lambda k=idx: self._start_song(k)),
+                )
 
         labels = [th.t("rhythm.calibration"), th.t("rhythm.keys")]
         for i, label in enumerate(labels[:rows]):
@@ -160,7 +241,10 @@ class RhythmMenuScreen(Screen):
                 action=(lambda idx=i: self._start_function(idx)),
             )
 
-        center_text(scr, h - 2, th.t("rhythm.menu_hint"), C.dim)
+        if self.notice:
+            center_text(scr, h - 2, self.notice, C.red)
+        else:
+            center_text(scr, h - 2, th.t("rhythm.menu_hint"), C.dim)
 
 
 class RhythmCalibScreen(Screen):
