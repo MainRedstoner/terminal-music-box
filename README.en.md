@@ -93,6 +93,11 @@ pauses, and the next key press resumes it. The **Song button** shows only while
 prenatal mode is on; `^A` picks the song at any time (defaults to the first:
 Twinkle Twinkle). Songs loop.
 
+Canon, Minuet in G, Turkish March and Für Elise sound pitches outside the
+free-play keyboard: the first start — and any start after a song or timbre
+change — shows a brief "loading" pass that pre-renders them, then plays;
+later starts are immediate.
+
 ### Rhythm Game
 - The melody auto-plays for the whole run — each note sounds exactly as it
   crosses the judgment line. Your taps are silent judgment only.

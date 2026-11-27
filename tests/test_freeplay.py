@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 from tmb import songs
 from tmb.audio import synth
 from tmb.events import KeyEvent
-from tmb.screens.freeplay import (ACTIVITY_WINDOW, KEY_MIDI, STUCK_TIMEOUT,
-                                  REPEAT_TIMEOUT)
+from tmb.screens.freeplay import (ACTIVITY_WINDOW, KEY_MIDI, PRELOAD_MIDIS,
+                                  STUCK_TIMEOUT, REPEAT_TIMEOUT, WAIT_TIMEOUT)
 
 try:
     from tests.helpers import HeadlessCase, has_cjk
@@ -321,6 +322,191 @@ class FreePlay(HeadlessCase):
     def test_mouse_click_on_back_button(self):
         self.click_label(self.app.theme.t("common.back"))
         self.assertEqual(self.app.current_name, "menu")
+
+
+class PrenatalPreload(HeadlessCase):
+    """Prenatal playback waits for the selected song's own pitch set.
+
+    The free-play preload covers 21 keyboard keys only, while prenatal mode
+    auto-plays a song's complete score — which reaches outside that range
+    (Canon's bass line, Für Elise's top octave). A cold (timbre, midi) render
+    runs inline in the UI thread, so starting early freezes a frame and fires
+    the note late; the screen must wait for the background preload instead.
+    """
+
+    start_screen = "freeplay"
+
+    def setUp(self):
+        super().setUp()
+        # The gate is armed only when a real playback thread exists; headless
+        # runs keep starting immediately (see test_headless_runs_skip_the_gate).
+        self.engine.realtime = True
+        self.engine.preload = mock.Mock()
+        self.engine.is_preloaded = mock.Mock(return_value=False)
+        self.engine.preload_status = mock.Mock(return_value=(True, 0, 8))
+
+    def requested(self):
+        tid, midis = self.engine.preload.call_args[0]
+        return tid, list(midis)
+
+    def test_starting_prenatal_waits_for_the_configured_song(self):
+        self.cfg.prenatal_song = "fur_elise"
+        self.press("ctrl+t")
+        p = self.screen.player
+        self.assertEqual(p.song.id, "fur_elise")
+        self.assertTrue(self.screen._waiting)
+        self.assertFalse(p.playing)
+        tid, midis = self.requested()
+        self.assertEqual(tid, self.cfg.timbre)
+        self.assertLessEqual(set(songs.SONGS["fur_elise"].pitches), set(midis))
+
+    def test_playback_starts_at_the_top_once_the_buffers_land(self):
+        self.cfg.prenatal_song = "fur_elise"
+        self.press("ctrl+t")
+        p = self.screen.player
+        self.press("q")  # a key press must not force a cold start
+        self.assertFalse(p.playing)
+        self.engine.is_preloaded.return_value = True
+        self.engine.preload_status.return_value = (False, 8, 8)
+        self.step()
+        self.assertTrue(p.playing)
+        self.assertFalse(self.screen._waiting)
+        self.assertLess(p.pos, 0.05)
+
+    def test_every_builtin_song_is_preloaded_whole(self):
+        for sid in songs.ORDER:
+            with self.subTest(song=sid):
+                self.engine.preload.reset_mock()
+                self.app.navigate("freeplay")
+                self.cfg.prenatal_song = sid
+                self.press("ctrl+t")
+                tid, midis = self.requested()
+                self.assertEqual(tid, self.cfg.timbre)
+                # The song's complete score, not just the 21 keyboard keys.
+                self.assertLessEqual(set(songs.SONGS[sid].pitches), set(midis))
+                # ...and the keyboard stays warm from the same request.
+                self.assertLessEqual(set(PRELOAD_MIDIS), set(midis))
+
+    def test_switching_timbre_mid_song_reloads_and_resumes_in_place(self):
+        self.engine.is_preloaded.return_value = True
+        self.engine.preload_status.return_value = (False, 8, 8)
+        self.press("ctrl+t")
+        p = self.screen.player
+        self.assertTrue(p.playing)
+        self.advance(0.5)
+        pos = p.pos
+        self.assertGreater(pos, 0.4)
+        self.engine.preload.reset_mock()
+        self.engine.is_preloaded.return_value = False
+        self.engine.preload_status.return_value = (True, 0, 8)
+        self.press("ctrl+x")
+        self.assertEqual(p.timbre, self.cfg.timbre)
+        self.assertEqual(p.timbre, "bit")
+        self.assertTrue(self.screen._waiting)
+        self.assertFalse(p.playing)
+        self.assertGreaterEqual(p.pos, pos)  # parked mid-phrase, not rewound
+        self.assertEqual(self.engine.preload.call_args[0][0], "bit")
+        self.engine.is_preloaded.return_value = True
+        self.step()
+        self.assertTrue(p.playing)
+        self.assertGreater(p.pos, pos)
+
+    def test_picking_a_new_song_waits_for_its_buffers(self):
+        self.engine.is_preloaded.return_value = True
+        self.press("ctrl+t")
+        self.assertTrue(self.screen.player.playing)
+        self.engine.preload.reset_mock()
+        self.engine.is_preloaded.return_value = False
+        self.press("ctrl+a")
+        self.assertEqual(self.app.current_name, "song_select")
+        self.press("enter")
+        self.assertEqual(self.app.current_name, "freeplay")
+        p = self.screen.player
+        self.assertEqual(p.song.id, songs.ORDER[0])
+        self.assertTrue(self.screen._waiting)
+        self.assertFalse(p.playing)
+        tid, midis = self.requested()
+        self.assertEqual(tid, self.cfg.timbre)
+        self.assertLessEqual(set(p.song.pitches), set(midis))
+
+    def test_song_loop_regates_a_cold_cache(self):
+        self.engine.is_preloaded.return_value = True
+        self.cfg.prenatal_song = "mary_lamb"
+        self.press("ctrl+t")
+        p = self.screen.player
+        duration = p.song.duration
+        flipped = False
+        for _ in range(int((duration + 2.0) / 0.05)):
+            if not flipped and p.pos > duration - 0.3:
+                # Something (the rhythm game, a timbre switch) evicted the
+                # buffers while the song was playing: the loop must not start
+                # cold again.
+                self.engine.preload.reset_mock()
+                self.engine.is_preloaded.return_value = False
+                self.engine.preload_status.return_value = (True, 0, 4)
+                flipped = True
+            self.step(0.05)
+            self.term.key("q")  # keep the 2 s activity window open
+            if self.screen._waiting:
+                break
+        self.assertTrue(flipped)
+        self.assertTrue(self.screen._waiting)
+        self.assertFalse(p.playing)
+        self.assertEqual(p.pos, 0.0)
+        self.engine.preload.assert_called()
+
+    def test_a_superseded_request_is_reissued(self):
+        self.cfg.prenatal_song = "fur_elise"
+        self.press("ctrl+t")
+        self.assertTrue(self.screen._waiting)
+        self.assertEqual(self.engine.preload.call_count, 1)
+        # Another screen's preload superseded ours and finished without the
+        # song: the gate must re-ask instead of waiting forever.
+        self.engine.preload_status.return_value = (False, 5, 5)
+        self.step()
+        self.assertEqual(self.engine.preload.call_count, 2)
+        self.assertTrue(self.screen._waiting)
+
+    def test_a_wedged_preload_falls_back_to_playing(self):
+        self.cfg.prenatal_song = "fur_elise"
+        self.press("ctrl+t")
+        p = self.screen.player
+        self.assertFalse(p.playing)
+        self.advance(WAIT_TIMEOUT + 1.0)
+        self.assertTrue(p.playing)
+        self.assertFalse(self.screen._waiting)
+
+    def test_the_wait_survives_the_song_picker(self):
+        self.press("ctrl+t")
+        fp = self.screen
+        player = fp.player
+        self.assertTrue(fp._waiting)
+        self.press("ctrl+a")
+        self.press("esc")
+        self.assertEqual(self.app.current_name, "freeplay")
+        self.assertIs(self.screen.player, player)  # the picker keeps the player
+        self.assertTrue(self.screen._waiting)
+        self.engine.is_preloaded.return_value = True
+        self.step()
+        self.assertTrue(player.playing)
+
+    def test_toggling_off_while_waiting_stops_cleanly(self):
+        self.cfg.prenatal_song = "fur_elise"
+        self.press("ctrl+t")
+        self.assertTrue(self.screen._waiting)
+        self.press("ctrl+t")
+        self.assertIsNone(self.screen.player)
+        self.assertFalse(self.screen._waiting)
+        self.assertFalse(self.screen.prenatal)
+        self.assertEqual(self.engine.active(), 0)
+
+    def test_headless_runs_skip_the_gate(self):
+        self.engine.realtime = False
+        self.cfg.prenatal_song = "fur_elise"
+        self.press("ctrl+t")
+        self.assertTrue(self.screen.player.playing)
+        self.assertFalse(self.screen._waiting)
+        self.engine.preload.assert_not_called()
 
 
 class SoundStrip(HeadlessCase):

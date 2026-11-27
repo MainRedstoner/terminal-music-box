@@ -43,6 +43,17 @@ class Song:
             return 0.0
         return max(n.time + n.dur for n in self.notes)
 
+    @cached_property
+    def pitches(self) -> List[int]:
+        """Every pitch the auto-play can sound, sorted and deduped.
+
+        Prenatal mode plays `notes` — the complete score — and a complete score
+        reaches well outside the 21-key free-play range (Canon's bass line
+        bottoms out at C2, Für Elise climbs to E7), so the preload and the
+        "may I start?" gate key off this set, never off the keyboard.
+        """
+        return sorted({n.midi for n in self.notes})
+
     def title(self, lang: str) -> str:
         return self.title_zh if lang == "zh" else self.title_en
 

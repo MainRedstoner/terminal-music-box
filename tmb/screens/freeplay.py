@@ -19,14 +19,18 @@ ROWS: Tuple[Tuple[str, str, Tuple[int, ...]], ...] = (
 KEY_MIDI: Dict[str, int] = {k: m for _, keys, midis in ROWS for k, m in zip(keys, midis)}
 PLAY_KEYS = frozenset(KEY_MIDI)
 NOTE_NAMES = {0: "C", 2: "D", 4: "E", 5: "F", 7: "G", 9: "A", 11: "B"}
-# Every built-in melody pitch lies inside the free-play range, so pre-rendering
-# these 21 keys covers free play, prenatal mode and the rhythm game alike.
+# Pre-rendering the 21 keyboard pitches keeps free play from stalling on the
+# first press. Prenatal mode is a different animal: it auto-plays a song's
+# complete score, which reaches outside C3-B5 (Canon's bass line bottoms out at
+# C2, Für Elise climbs to E7), so it preloads the selected song's own pitches
+# and waits for them before playback starts — see _ensure_buffers.
 PRELOAD_MIDIS = sorted(set(KEY_MIDI.values()))
 
 REPEAT_TIMEOUT = 0.2   # auto-repeat debounce: legacy terminals have no key-up
 MAX_HOLD = 8.0         # safety cap on a held voice if a release event is lost
 STUCK_TIMEOUT = 2.0    # release events enabled but none arrived for this long
 ACTIVITY_WINDOW = 2.0
+WAIT_TIMEOUT = 60.0    # a wedged preload must not silence prenatal mode forever
 NOTE_DUR = 1.0
 VOL_STEP = 0.1
 LEN_STEP = 0.25
@@ -69,6 +73,10 @@ class FreePlayScreen(Screen):
         self.key_voice: Dict[str, int] = {}
         self.focus = 0  # 0 = volume, 1 = note length (sound strip)
         self._mouse_key: Optional[str] = None
+        # Prenatal playback is paused until the song's pitches are rendered
+        # (see _begin_playback); _wait_started bounds that wait.
+        self._waiting = False
+        self._wait_started = 0.0
 
     def enter(self, **kw) -> None:
         if self.player is not None:
@@ -86,6 +94,7 @@ class FreePlayScreen(Screen):
             self.player.stop()
             self.player = None
         self.prenatal = False
+        self._waiting = False
         self.audio.stop_all()
 
     # Input -------------------------------------------------------------------
@@ -170,8 +179,12 @@ class FreePlayScreen(Screen):
         self.config.save()
         self._clear_keys()
         if self.player is not None:
+            # The melody is about to continue on a timbre whose buffers do not
+            # exist yet: re-render the whole song before letting it resume.
             self.player.set_timbre(tid)
-        self.audio.preload(tid, PRELOAD_MIDIS)  # no stall on the first press
+            self._begin_playback()
+        else:
+            self.audio.preload(tid, PRELOAD_MIDIS)  # no stall on the first press
 
     # Sound strip -------------------------------------------------------------
 
@@ -201,13 +214,14 @@ class FreePlayScreen(Screen):
             self.player.stop()
             self.player = None
             self.prenatal = False
+            self._waiting = False
 
     def _start_player(self, sid: Optional[str]) -> None:
         vol, length = self.config.sound_params(self.config.timbre)
         self.player = songs.SongPlayer(self.audio, songs.get_song(sid),
                                        self.config.timbre, vol=vol, length=length)
-        self.player.start()
         self.last_activity = self.clock
+        self._begin_playback(restart=True)
 
     def _pick_song(self) -> None:
         self._picking = True
@@ -217,6 +231,62 @@ class FreePlayScreen(Screen):
         if self.player is not None:
             self.player.stop()
             self._start_player(sid)
+
+    # Prenatal preload gate ---------------------------------------------------
+
+    def _begin_playback(self, restart: bool = False) -> None:
+        """Start (or resume) the melody, but only once its buffers are cached.
+
+        A cold (timbre, midi) render runs inline in whichever thread asks for
+        it — here the UI thread, mid-frame — so starting a song (or switching
+        timbre mid-song) before its own pitches are rendered freezes the frame
+        and fires the note late for every pitch the keyboard preload misses.
+        The background preload already reports progress through the app's
+        loading overlay, so the wait is visible to the user.
+        """
+        p = self.player
+        if p is None:
+            return
+        if restart:
+            p.start()
+            self.last_activity = self.clock
+        if self._ensure_buffers(force=True):
+            self._waiting = False
+            return
+        self._waiting = True
+        self._wait_started = self.clock
+        p.pause()
+
+    def _ensure_buffers(self, force: bool = False) -> bool:
+        """True when every pitch of the song is cached for the player's timbre.
+
+        Missing pitches are requested in the background. `force` (a fresh
+        start) always asks, so a request superseded by another screen or by a
+        newer timbre cannot leave the gate shut for good; otherwise it only
+        re-asks when nothing is in flight, which rescues a request that ended
+        without covering the song.
+        """
+        p = self.player
+        if p is None:
+            return True
+        if not self.audio.realtime:
+            return True  # offline/headless runs have no playback thread to stall
+        midis = p.song.pitches
+        if self.audio.is_preloaded(p.timbre, midis):
+            return True
+        if force or not self.audio.preload_status()[0]:
+            self._request_buffers()
+        return False
+
+    def _request_buffers(self) -> None:
+        """Pre-render the song's pitches first, then the keyboard keys."""
+        p = self.player
+        if p is None:
+            return
+        keys = p.song.pitches
+        have = set(keys)
+        self.audio.preload(p.timbre,
+                           keys + [m for m in PRELOAD_MIDIS if m not in have])
 
     # Simulation --------------------------------------------------------------
 
@@ -236,13 +306,27 @@ class FreePlayScreen(Screen):
                     self._release(key)
         p = self.player
         if p is not None:
-            if self.clock - self.last_activity > ACTIVITY_WINDOW:
-                p.pause()
-            else:
-                p.resume()
-            p.update(dt)
-            if p.finished:
-                p.start()
+            if self._waiting:
+                if self._ensure_buffers():
+                    self._waiting = False
+                    self.last_activity = self.clock
+                    p.resume()
+                elif self.clock - self._wait_started > WAIT_TIMEOUT:
+                    # A wedged render must not mute the instrument for good:
+                    # play anyway and take the stalls as they come.
+                    self._waiting = False
+                    self.last_activity = self.clock
+                    p.resume()
+            if not self._waiting:
+                if self.clock - self.last_activity > ACTIVITY_WINDOW:
+                    p.pause()
+                else:
+                    p.resume()
+                p.update(dt)
+                if p.finished:
+                    # The loop restarts from a cold cache if another screen
+                    # evicted these buffers meanwhile: gate it like a start.
+                    self._begin_playback(restart=True)
 
     # Drawing -----------------------------------------------------------------
 
