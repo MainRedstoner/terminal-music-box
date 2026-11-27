@@ -84,22 +84,24 @@ Z X C V B N M   — low   (C3..B3)
   up their decay rather than cutting the tail). Changes apply instantly; bit
   defaults to 0.25× length.
 - `^T` — toggle prenatal mode.
-- `^A` — choose the prenatal song.
+- `^A` — choose the prenatal song (only responds while prenatal mode is on).
 - `^Q`/`^D`/`^C`/`Esc` — back to menu.
 - The on-screen keys and buttons are mouse-clickable.
 
 ### Prenatal mode
-When on, a lullaby plays automatically and the play keys become a silent
+Turning it on — or changing its song — does not start the melody by itself:
+press **any** play key to begin. From then on the play keys become a silent
 accompaniment: they still light up and keep the music going, but make no sound.
-Press **any** play key within **2 seconds** to keep it playing; otherwise it
-pauses, and the next key press resumes it. The **Song button** shows only while
-prenatal mode is on; `^A` picks the song at any time. The choice is limited to
-the rhythm game's four songs (defaults to Canon in C). Songs loop.
+**2 seconds** without a play key pauses it; the next key press resumes it. The
+**Song button** shows only while prenatal mode is on, and `^A` responds only
+then. The choice is limited to the rhythm game's four songs (defaults to
+Canon in C). Songs loop.
 
 Canon, Minuet in G, Turkish March and Für Elise sound pitches outside the
 free-play keyboard: the first start — and any start after a song or timbre
-change — shows a brief "loading" pass that pre-renders them, then plays;
-later starts are immediate.
+change — shows a brief "loading" pass that pre-renders them; a melody already
+playing resumes where it was, while a not-yet-started one stays silent until a
+play key; later starts are immediate.
 
 ### Rhythm Game
 - The melody auto-plays for the whole run — each note sounds exactly as it
