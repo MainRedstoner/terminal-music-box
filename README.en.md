@@ -73,10 +73,11 @@ Z X C V B N M   — low   (C3..B3)
   iron xylophone, cow bell, didgeridoo, bit, banjo, pling).
 - **Key hold**: on Kitty-protocol terminals (or Windows terminals), sustained
   timbres (flute, bit, didgeridoo) hold until key-up. Harp, bell and chime
-  decay at the current length setting while held and speed up on key-up;
-  other timbres stay fixed-length one-shots, and holding never re-triggers a
-  note. WSL (ConPTY) stops delivering key releases on the alternate screen,
-  so the app automatically skips it there to keep key-up events flowing.
+  decay at the current length setting while held and speed up to their own
+  release time constant (0.15–0.25 s) on key-up; other timbres stay
+  fixed-length one-shots, and holding never re-triggers a note. WSL (ConPTY)
+  stops delivering key releases on the alternate screen, so the app
+  automatically skips it there to keep key-up events flowing.
 - **Volume / length**: the strip below the keyboard — `↑/↓` switches between
   volume and note length, `←/→` steps the current timbre's value (volume
   0–2.0, length 0.25–4×; ringing timbres can only be shortened, which speeds

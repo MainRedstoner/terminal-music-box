@@ -32,9 +32,6 @@ WAIT_TIMEOUT = 60.0    # a wedged preload must not silence prenatal mode forever
 NOTE_DUR = 1.0
 VOL_STEP = 0.1
 LEN_STEP = 0.25
-# Ringing timbres whose held notes follow the length setting (decay at the
-# chosen rate) and speed up on key-up. Other ringing timbres stay one-shot.
-HOLD_TIMBRES = frozenset({"harp", "bell", "chime"})
 BAR_SLOTS = 8
 CAP_W = 5
 LABEL_W = 6
@@ -147,11 +144,11 @@ class FreePlayScreen(Screen):
         midi = KEY_MIDI[key]
         tid = self.config.timbre
         vol, length = self.config.sound_params(tid)
-        if self.app.release_events() and (synth.get_timbre(tid).sustain
-                                          or tid in HOLD_TIMBRES):
+        t = synth.get_timbre(tid)
+        if self.app.release_events() and (t.sustain or t.release_tau is not None):
             # Real key-up events: a sustained timbre holds until release; a
             # holdable ringing timbre decays at the selected rate while held
-            # and speeds up on key-up.
+            # and speeds up to its release time constant on key-up.
             self.key_voice[key] = self.audio.note_on(tid, midi, vol,
                                                      length=length)
         else:

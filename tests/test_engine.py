@@ -70,14 +70,14 @@ class VoiceBookkeeping(unittest.TestCase):
         self.assertTrue(v.done)
         self.assertLessEqual(chunks * 256, rel_len + 256)
 
-    def test_note_off_on_a_played_one_shot_accelerates_decay(self):
+    def test_note_off_on_a_played_one_shot_is_a_noop(self):
         vid = self.eng.play_note("harp", 60, 0.5)
         v = self.eng._voices[vid]
         before = list(v._segments)
         self.eng.note_off(vid)
         self.assertEqual(v._segments, before)  # buffer untouched
-        self.assertFalse(v.done)               # decays on the mixer
-        self.assertLess(v._decay, 1.0)
+        self.assertFalse(v.done)
+        self.assertEqual(v._decay, 1.0)  # no key-release curve
 
     def test_note_off_unknown_id_is_safe(self):
         self.eng.note_off(9999)
@@ -114,11 +114,18 @@ class VoiceBookkeeping(unittest.TestCase):
     def test_note_off_accelerates_the_held_decay(self):
         vid = self.eng.note_on("harp", 60)  # natural decay while held
         v = self.eng._voices[vid]
+        self.assertEqual(v._release_tau, 0.15)
         self.assertEqual(v._decay, 1.0)
         self.eng.note_off(vid)
         self.assertLess(v._decay, 1.0)  # key-up decays faster than the hold
-        v.pull(int(synth.SR * 0.3))
+        v.pull(int(synth.SR * 1.5))
         self.assertTrue(v.done)
+
+    def test_hold_release_rates_are_per_timbre(self):
+        self.assertEqual(synth.get_timbre("harp").release_tau, 0.15)
+        self.assertEqual(synth.get_timbre("bell").release_tau, 0.25)
+        self.assertEqual(synth.get_timbre("chime").release_tau, 0.20)
+        self.assertIsNone(synth.get_timbre("guitar").release_tau)
 
     def test_play_note_length_extends_sustained_assembly(self):
         vid = self.eng.play_note("flute", 60, 0.5, length=4.0)

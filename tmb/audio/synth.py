@@ -228,6 +228,9 @@ class Timbre:
     name_zh = "基础"
     name_en = "Base"
     sustain = False
+    # Decay time constant (s) applied when a held ringing note is released;
+    # None keeps the timbre out of the key-hold path (fixed one-shot notes).
+    release_tau: Optional[float] = None
 
     def render(self, midi: int) -> NoteBuffers:
         raise NotImplementedError
@@ -238,6 +241,7 @@ class Harp(Timbre):
     name_zh = "竖琴（钢琴）"
     name_en = "Harp"
     sustain = False
+    release_tau = 0.15
 
     def render(self, midi):
         f = midi_to_freq(midi)
@@ -306,6 +310,7 @@ class Bell(Timbre):
     name_zh = "钟声"
     name_en = "Bell"
     sustain = False
+    release_tau = 0.25
 
     def render(self, midi):
         f = midi_to_freq(midi)
@@ -333,6 +338,7 @@ class Chime(Timbre):
     name_zh = "风铃"
     name_en = "Chime"
     sustain = False
+    release_tau = 0.20
 
     def render(self, midi):
         f = midi_to_freq(midi)

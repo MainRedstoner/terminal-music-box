@@ -62,7 +62,7 @@ class Voice:
     def __init__(self, segments: List[Segment], release: Optional[array] = None,
                  sustain: bool = False, gain: float = 1.0,
                  steady: Optional[array] = None, start: int = 0,
-                 decay: float = 1.0):
+                 decay: float = 1.0, release_tau: Optional[float] = None):
         self._segments = segments
         self._idx = 0
         self._pos = start
@@ -81,6 +81,9 @@ class Voice:
         # note by speeding up its decay instead of slicing its buffer.
         self._decay = decay
         self._decay_g = 1.0
+        # Timbre-specific time constant used to speed the decay up on key-up
+        # (None = this voice is not a key-held ringing note).
+        self._release_tau = release_tau
 
     def fade_out(self, samples: int) -> None:
         """Mark the voice to ramp to silence over `samples` frames."""
@@ -94,10 +97,11 @@ class Voice:
 
     def release(self) -> None:
         if not self._sustain:
-            # Held ringing note: key-up speeds the decay up sharply instead
-            # of cutting the tail off. The mixer keeps the curve smooth.
-            fast = math.exp(-7.0 / max(1, int(SR * 0.25)))
-            self._decay = min(self._decay, fast)
+            if self._release_tau is not None:
+                # Key-up speeds the held decay up to the timbre's release
+                # time constant; the mixer keeps the curve smooth.
+                fast = math.exp(-1.0 / (max(0.01, self._release_tau) * SR))
+                self._decay = min(self._decay, fast)
             return
         seg = self._steady
         if seg is not None and len(seg):
@@ -496,7 +500,8 @@ class AudioEngine:
             buf = nb.oneshot if nb.oneshot is not None else assemble_oneshot(nb, 1.0)
             mult = 1.0 if length is None else max(0.12, float(length))
             v = Voice([(buf, False)], gain=vel,
-                      decay=_length_decay(len(buf), mult))
+                      decay=_length_decay(len(buf), mult),
+                      release_tau=t.release_tau)
         return self._add(v)
 
     def play_note(self, tid: str, midi: int, dur: float, vel: float = 1.0,
