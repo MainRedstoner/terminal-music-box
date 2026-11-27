@@ -32,6 +32,9 @@ WAIT_TIMEOUT = 60.0    # a wedged preload must not silence prenatal mode forever
 NOTE_DUR = 1.0
 VOL_STEP = 0.1
 LEN_STEP = 0.25
+# Ringing timbres whose held notes follow the length setting (decay at the
+# chosen rate) and speed up on key-up. Other ringing timbres stay one-shot.
+HOLD_TIMBRES = frozenset({"harp", "bell", "chime"})
 BAR_SLOTS = 8
 CAP_W = 5
 LABEL_W = 6
@@ -142,15 +145,17 @@ class FreePlayScreen(Screen):
         if self.player is not None:
             return  # prenatal mode: keys only keep the auto-play alive, no sound
         midi = KEY_MIDI[key]
-        vol, length = self.config.sound_params(self.config.timbre)
-        if self.app.release_events():
-            # Real key-up events: hold the voice until the key is released.
-            # Ringing timbres sound their natural tail while held and get a
-            # fast release on key-up, so the hold itself shapes the note.
-            self.key_voice[key] = self.audio.note_on(self.config.timbre, midi, vol)
+        tid = self.config.timbre
+        vol, length = self.config.sound_params(tid)
+        if self.app.release_events() and (synth.get_timbre(tid).sustain
+                                          or tid in HOLD_TIMBRES):
+            # Real key-up events: a sustained timbre holds until release; a
+            # holdable ringing timbre decays at the selected rate while held
+            # and speeds up on key-up.
+            self.key_voice[key] = self.audio.note_on(tid, midi, vol,
+                                                     length=length)
         else:
-            self.audio.play_note(self.config.timbre, midi, NOTE_DUR, vol,
-                                 length=length)
+            self.audio.play_note(tid, midi, NOTE_DUR, vol, length=length)
 
     def _key_up(self, key: str) -> None:
         if key in KEY_MIDI:

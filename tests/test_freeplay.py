@@ -55,14 +55,15 @@ class FreePlay(HeadlessCase):
         self.assertEqual(self.screen.key_down, {})
         self.assertEqual(self.engine.active(), 21)
 
-    def test_key_up_releases_a_held_ringing_note(self):
+    def test_key_up_accelerates_a_held_ringing_decay(self):
         self.press("a")
         voice = next(iter(self.engine._voices.values()))
-        self.assertTrue(voice._sustain)
+        self.assertFalse(voice._sustain)
+        self.assertEqual(voice._decay, 1.0)  # harp defaults to natural length
         self.release("a")
         self.assertEqual(self.screen.key_down, {})
-        self.assertEqual(self.engine.active(), 1)  # release tail still sounds
-        self.assertEqual([loop for _, loop in voice._segments], [False])
+        self.assertEqual(self.engine.active(), 1)  # still decaying, not cut
+        self.assertLess(voice._decay, 1.0)
 
     def test_sustained_timbre_holds_a_voice_until_key_release(self):
         self.cfg.timbre = "bit"
@@ -121,17 +122,25 @@ class FreePlay(HeadlessCase):
         self.assertEqual(self.engine.active(), 1)
         self.assertTrue(self.screen.key_down.get("a"))
 
-    def test_ringing_timbre_holds_until_key_release(self):
+    def test_held_ringing_note_uses_the_selected_length(self):
+        self.cfg.set_sound("harp", ln=0.5)
         self.press("a")
         voice = next(iter(self.engine._voices.values()))
-        self.assertTrue(voice._sustain)  # held ringing notes loop
-        self.assertEqual([loop for _, loop in voice._segments], [False, True])
-        self.assertIn("a", self.screen.key_voice)
+        self.assertFalse(voice._sustain)
+        self.assertLess(voice._decay, 1.0)  # decays at the 0.5x length
         self.advance(1.0)
         self.assertEqual(self.engine.active(), 1)  # still sounding while held
         self.release("a")
         self.assertNotIn("a", self.screen.key_voice)
+
+    def test_non_hold_ringing_timbres_stay_one_shots(self):
+        self.cfg.timbre = "guitar"
+        self.press("a")
+        voice = next(iter(self.engine._voices.values()))
+        self.assertNotIn("a", self.screen.key_voice)  # no key-up release path
         self.assertEqual([loop for _, loop in voice._segments], [False])
+        self.release("a")
+        self.assertEqual(self.engine.active(), 1)  # plays its natural tail
 
     def test_legacy_sustained_timbre_plays_a_fixed_length_one_shot(self):
         self.term.release_events = False

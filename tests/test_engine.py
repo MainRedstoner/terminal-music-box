@@ -70,14 +70,14 @@ class VoiceBookkeeping(unittest.TestCase):
         self.assertTrue(v.done)
         self.assertLessEqual(chunks * 256, rel_len + 256)
 
-    def test_note_off_on_a_played_one_shot_schedules_a_release(self):
+    def test_note_off_on_a_played_one_shot_accelerates_decay(self):
         vid = self.eng.play_note("harp", 60, 0.5)
         v = self.eng._voices[vid]
         before = list(v._segments)
         self.eng.note_off(vid)
         self.assertEqual(v._segments, before)  # buffer untouched
-        self.assertFalse(v.done)               # fades on the mixer, not instantly
-        self.assertGreater(v._fade_left, 0)
+        self.assertFalse(v.done)               # decays on the mixer
+        self.assertLess(v._decay, 1.0)
 
     def test_note_off_unknown_id_is_safe(self):
         self.eng.note_off(9999)
@@ -101,21 +101,24 @@ class VoiceBookkeeping(unittest.TestCase):
         v.pull(int(len(natural) * 0.5))
         self.assertTrue(v.done)  # -60 dB by the shortened length
 
-    def test_ringing_note_loops_while_held_and_releases_on_note_off(self):
-        vid = self.eng.note_on("harp", 60)
+    def test_held_ringing_note_decays_at_the_selected_length(self):
+        natural = self.eng._buffers("harp", 60).oneshot
+        vid = self.eng.note_on("harp", 60, length=0.5)
         v = self.eng._voices[vid]
-        self.assertTrue(v._sustain)  # held ringing notes loop a period
-        self.assertEqual([loop for _, loop in v._segments], [False, True])
-        self.eng.note_off(vid)
-        self.assertEqual([loop for _, loop in v._segments], [False])
-        self.assertLessEqual(len(v._segments[0][0]), int(synth.SR * 0.16))
+        self.assertFalse(v._sustain)
+        self.assertIs(v._segments[0][0], natural)  # shared buffer, not a slice
+        self.assertLess(v._decay, 1.0)
+        v.pull(int(len(natural) * 0.5))
+        self.assertTrue(v.done)  # -60 dB by the shortened length
 
-    def test_ringing_hold_loop_seam_is_click_free(self):
-        vid = self.eng.note_on("harp", 60)
-        loop = self.eng._voices[vid]._steady
-        self.assertGreater(len(loop), 1)
-        diffs = [abs(loop[i] - loop[i - 1]) for i in range(1, len(loop))]
-        self.assertLessEqual(abs(loop[0] - loop[-1]), max(diffs) * 1.5)
+    def test_note_off_accelerates_the_held_decay(self):
+        vid = self.eng.note_on("harp", 60)  # natural decay while held
+        v = self.eng._voices[vid]
+        self.assertEqual(v._decay, 1.0)
+        self.eng.note_off(vid)
+        self.assertLess(v._decay, 1.0)  # key-up decays faster than the hold
+        v.pull(int(synth.SR * 0.3))
+        self.assertTrue(v.done)
 
     def test_play_note_length_extends_sustained_assembly(self):
         vid = self.eng.play_note("flute", 60, 0.5, length=4.0)

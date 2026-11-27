@@ -15,8 +15,7 @@ from array import array
 from typing import Dict, List, Optional, Tuple
 
 from .backends import Backend, open_backend
-from .synth import (SR, NoteBuffers, Timbre, fade_out, get_timbre,
-                    midi_to_freq, render_note, zeros)
+from .synth import SR, NoteBuffers, Timbre, fade_out, get_timbre, render_note, zeros
 
 Segment = Tuple[array, bool]
 # Long natural tails make rendered notes large (~0.1-1.3 MB per key), so
@@ -95,9 +94,10 @@ class Voice:
 
     def release(self) -> None:
         if not self._sustain:
-            # A held ringing note has no loop to fall back on; on key-up it
-            # must die quickly instead of ringing its long natural tail.
-            self.fade_out(max(1, int(SR * 0.09)))
+            # Held ringing note: key-up speeds the decay up sharply instead
+            # of cutting the tail off. The mixer keeps the curve smooth.
+            fast = math.exp(-7.0 / max(1, int(SR * 0.25)))
+            self._decay = min(self._decay, fast)
             return
         seg = self._steady
         if seg is not None and len(seg):
@@ -205,36 +205,13 @@ def assemble_oneshot(nb: NoteBuffers, dur: float) -> array:
     return out
 
 
-def hold_segments(buf: array, midi: int) -> Tuple[array, array]:
-    """Split a ringing buffer into a natural head plus a seamless sustain loop.
-
-    Ringing timbres fill only `oneshot`, but a held key must keep sounding
-    instead of letting the natural decay die away.  The loop is one period of
-    the fundamental taken after the attack; its first samples are crossfaded
-    with the following period so the seam stays click-free even when SR/f is
-    not an integer.  Only the head (0.12 s) and one period are copied, never
-    the multi-second source buffer.
-    """
-    period = max(2, int(round(SR / midi_to_freq(midi))))
-    xfade = min(period, max(1, int(SR * 0.004)))
-    start = min(int(SR * 0.12), max(0, len(buf) - period - xfade - 1))
-    loop = array("f", buf[start:start + period])
-    tail = buf[start + period:start + period + xfade]
-    n = min(xfade, len(tail))
-    for i in range(n):
-        w = (i + 1) / (n + 1)
-        # Head of the loop slides in from the next period: the wrap from the
-        # loop's last sample into its first is then a neighbouring sample.
-        loop[i] = loop[i] * w + tail[i] * (1.0 - w)
-    head = array("f", buf[:start])
-    n = min(xfade, len(head))
-    for i in range(n):
-        w = (i + 1) / (n + 1)
-        # Slide the end of the head onto the loop's last sample, so the
-        # head flows into loop[0] exactly like the loop's own wrap.
-        idx = len(head) - n + i
-        head[idx] = head[idx] * (1.0 - w) + loop[len(loop) - n + i] * w
-    return head, loop
+def _length_decay(samples: int, mult: float) -> float:
+    """Per-sample gain decay that brings a ringing note to -60 dB in
+    `samples * mult` frames. 1.0 means the natural buffer is left alone."""
+    if mult >= 1.0 or samples <= 0:
+        return 1.0
+    target = max(int(SR * 0.12), int(samples * mult))
+    return math.exp(-7.0 / target)
 
 
 class AudioEngine:
@@ -501,7 +478,14 @@ class AudioEngine:
         with self._cache_lock:
             return all((tid, m) in self._cache for m in midis)
 
-    def note_on(self, tid: str, midi: int, vel: float = 1.0) -> int:
+    def note_on(self, tid: str, midi: int, vel: float = 1.0,
+                length: Optional[float] = None) -> int:
+        """Start a note that lasts until note_off.
+
+        Sustained timbres loop their steady segment. Ringing timbres play
+        their natural buffer, sped up by the per-timbre `length` multiplier
+        exactly like play_note; key-up then accelerates the decay further.
+        """
         nb = self._buffers(tid, midi)
         t = get_timbre(tid)
         if t.sustain and nb.steady is not None:
@@ -510,9 +494,9 @@ class AudioEngine:
                       sustain=True, gain=vel, steady=nb.steady)
         else:
             buf = nb.oneshot if nb.oneshot is not None else assemble_oneshot(nb, 1.0)
-            head, loop = hold_segments(buf, midi)
-            v = Voice([(head, False), (loop, True)], sustain=True, gain=vel,
-                      steady=loop)
+            mult = 1.0 if length is None else max(0.12, float(length))
+            v = Voice([(buf, False)], gain=vel,
+                      decay=_length_decay(len(buf), mult))
         return self._add(v)
 
     def play_note(self, tid: str, midi: int, dur: float, vel: float = 1.0,
@@ -534,11 +518,9 @@ class AudioEngine:
             buf = assemble_oneshot(nb, max(0.12, dur * mult))
         else:
             buf = nb.oneshot if nb.oneshot is not None else assemble_oneshot(nb, dur)
-            if mult < 1.0:
-                # Hit -60 dB at len*mult: the note sounds shorter, but its
-                # tail glides down instead of being cut mid-ring.
-                target = max(int(SR * 0.12), int(len(buf) * mult))
-                decay = math.exp(-7.0 / target)
+            # Hit -60 dB at len*mult: the note sounds shorter, but its tail
+            # glides down instead of being cut mid-ring.
+            decay = _length_decay(len(buf), mult)
         return self._add(Voice([(buf, False)], gain=vel, decay=decay))
 
     def _add(self, v: Voice) -> int:
