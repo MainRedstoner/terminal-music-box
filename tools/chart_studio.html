@@ -3,8 +3,12 @@
 
      音频经 WebAudio 播放（浏览器音频线程，页面卡顿不影响走带），六个轨道对应
      游戏键位 A S D J K L。延迟校准取按键采样中位数，一次性补偿「输出延迟 +
-     反应延迟」；降速作谱时反应分量按速率缩放。导出的 chart.json /
-     manifest.json 与 tools/make_pack.py --src 直接对接。 -->
+     反应延迟」；降速作谱时反应分量按速率缩放。
+
+     演奏视图（音符下落）负责跟着音乐放音符，时间轴视图（横向卷帘 + 波形）负责
+     网格对齐：格距 / 相位 / 整体偏移 / 量化强度，都是预览后才落笔。「打包 / 导出」
+     在浏览器里直接把 manifest.json、chart.json 与编码后的音频封进 .tmbp（zip），
+     不再需要任何命令行工具；打包结果也能用「音乐包」按钮重新打开继续编辑。 -->
 <html lang="zh">
 <head>
 <meta charset="utf-8">
@@ -367,7 +371,7 @@
     box-shadow: inset 0 0 0 1px rgba(76, 201, 255, .22);
   }
   .tolbar select, .toolbar select { height: 30px; }
-  #snapSelect { width: 100px; font-size: 11.5px; }
+  #snapSelect { width: 100%; font-size: 11.5px; }
   .toggle { height: 30px; font-size: 11.5px; color: var(--dim); }
   .toggle::before {
     content: ""; width: 6px; height: 6px; border-radius: 50%;
@@ -476,6 +480,43 @@
   .calib-info { font: 11px/1.6 var(--mono); color: var(--faint); margin-top: 4px; }
   .calib-tip { color: var(--dim); font-size: 11.5px; line-height: 1.8; margin: 0 0 4px; }
 
+  /* ---------------------------------------------------------------- 网格 / 对齐 */
+  .sub-hint { color: var(--faint); font-size: 10.5px; line-height: 1.65; margin: 3px 0 2px; }
+  .sub-hint.warn { color: var(--warn); }
+  .range-row { display: grid; grid-template-columns: 62px 1fr; gap: 8px; margin-top: 5px; align-items: center; }
+  .range-row input[type=range] { width: 100%; }
+  #phaseRange, #offsetRange { width: 100%; margin: 6px 0 2px; }
+  .strength-wrap { display: flex; align-items: center; gap: 8px; }
+  .strength-wrap input[type=range] { flex: 1 1 auto; min-width: 0; }
+  .strength-val { font: 500 10.5px/1 var(--mono); color: var(--text-2); width: 34px; text-align: right; }
+  .align-stats {
+    display: grid; gap: 4px; margin: 10px 0 8px; padding: 9px 10px;
+    border-radius: 8px; background: #0b111a; border: 1px solid var(--line-soft);
+  }
+  .align-stats div { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .align-stats span { color: var(--faint); font-size: 10px; letter-spacing: .04em; white-space: nowrap; }
+  .align-stats b { font: 600 11px/1.2 var(--mono); color: var(--text-2); white-space: nowrap; }
+  .action-row.two { grid-template-columns: 1fr 1fr; }
+  .card button.block { width: 100%; margin-top: 7px; }
+
+  /* ---------------------------------------------------------------- 打包 */
+  .pack-box {
+    display: grid; gap: 6px; margin-top: 12px; padding: 10px 12px;
+    border-radius: 9px; background: #0b111a; border: 1px solid var(--line-soft);
+  }
+  .pack-line { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 11.5px; }
+  .pack-line span { color: var(--faint); white-space: nowrap; }
+  .pack-line b {
+    color: var(--text-2); font: 600 11px/1.4 var(--mono);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .pack-progress { height: 5px; border-radius: 3px; background: #1a2434; overflow: hidden; margin-top: 2px; }
+  .pack-progress i {
+    display: block; height: 100%; width: 0;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    transition: width .12s linear;
+  }
+
   /* ---------------------------------------------------------------- 提示 */
   .toast {
     position: fixed; left: 50%; bottom: 142px; z-index: 100;
@@ -539,7 +580,7 @@
     <div class="logo" aria-hidden="true">♪</div>
     <div class="brand-text">
       <strong>作谱台</strong>
-      <span>Chart Studio</span>
+      <span>Chart · Align · Pack</span>
     </div>
   </div>
   <div class="divider" aria-hidden="true"></div>
@@ -559,6 +600,11 @@
     导入谱面
   </button>
   <input type="file" id="importFile" accept=".json,application/json" hidden>
+  <button id="btnOpenPack" title="打开 .tmbp 音乐包，继续编辑">
+    <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2.5h6.5A2.5 2.5 0 0 1 21 10v7.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+    音乐包
+  </button>
+  <input type="file" id="packFile" accept=".tmbp,application/zip" hidden>
   <div class="icon-group">
     <button id="btnUndo" class="icon" title="撤销 (Ctrl+Z)" aria-label="撤销" disabled>
       <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 7 4 12l5 5"/><path d="M4 12h10a5 5 0 0 1 0 10h-1"/></svg>
@@ -570,9 +616,9 @@
   <button id="btnHelp" class="icon" title="使用说明与快捷键 (?)" aria-label="帮助">
     <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.3 9.2a2.8 2.8 0 1 1 4 2.6c-.9.4-1.3 1-1.3 2"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/></svg>
   </button>
-  <button id="btnMeta" class="primary" title="填写曲目信息，导出 chart.json / manifest.json">
+  <button id="btnMeta" class="primary" title="填写曲目信息，打包 .tmbp 或导出 json">
     <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v11"/><path d="m8 10 4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
-    曲目信息 / 导出
+    打包 / 导出
   </button>
   <button id="btnSidebar" class="icon" title="显示 / 隐藏侧栏" aria-label="切换侧栏" aria-expanded="true">
     <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg>
@@ -602,7 +648,7 @@
       <span id="busyText">解码中…</span>
     </div>
 
-    <div class="drag-over" id="dragOver">松手以载入音频或谱面</div>
+    <div class="drag-over" id="dragOver">松手以载入音频、谱面或音乐包</div>
   </section>
 
   <aside class="sidebar" id="sidebar">
@@ -663,6 +709,59 @@
       </div>
     </section>
 
+    <section class="card">
+      <div class="card-head">
+        <h2>网格 / 对齐</h2>
+        <span class="chip" id="dirtyChip" hidden>未应用</span>
+      </div>
+
+      <div class="field">
+        <label for="snapSelect">网格</label>
+        <select id="snapSelect" title="网格吸附与量化都用这一个格距（按 BPM 计算）">
+          <option value="off">关（自由时间）</option>
+          <option value="1">1 拍</option>
+          <option value="2">1/2 拍</option>
+          <option value="4">1/4 拍</option>
+          <option value="8">1/8 拍</option>
+        </select>
+      </div>
+      <div class="sub-hint" id="gridHint">一格 0.125 s · 相位控制整张网格的左右位置</div>
+
+      <div class="field">
+        <label for="phaseMs">相位</label>
+        <input type="number" id="phaseMs" step="0.1" min="0" value="0" title="单位：毫秒">
+      </div>
+      <input type="range" id="phaseRange" min="0" max="125" step="0.1" value="0" aria-label="网格相位">
+      <div class="row" style="margin-top:6px">
+        <button id="btnAutoPhase" class="small">自动相位</button>
+        <button id="btnPhaseZero" class="small">归零</button>
+        <span class="grow"></span>
+        <button id="btnQuantize" class="small primary" title="把所有音符吸附到网格（可撤销）">量化全部</button>
+      </div>
+
+      <div class="field" style="margin-top:10px">
+        <label for="offsetMs">偏移</label>
+        <input type="number" id="offsetMs" step="0.1" min="-200" max="200" value="0" title="单位：毫秒；正数把音符整体往后推">
+      </div>
+      <input type="range" id="offsetRange" min="-200" max="200" step="0.1" value="0" aria-label="整体偏移">
+      <div class="field">
+        <label for="strength">强度</label>
+        <div class="strength-wrap">
+          <input type="range" id="strength" min="0" max="100" step="1" value="100" aria-label="量化强度">
+          <span class="strength-val" id="strengthVal">100%</span>
+        </div>
+      </div>
+      <button id="btnShift" class="small block" title="只应用整体偏移，不改动网格">仅偏移（不改网格）</button>
+
+      <div class="align-stats">
+        <div><span>当前偏差 中位/p90</span><b id="statCurrent">—</b></div>
+        <div><span>预览移动 中位/p90</span><b id="statPreview">—</b></div>
+        <div><span>预览后 ≤10/20/30 ms</span><b id="statBands">—</b></div>
+        <div><span>合并时间点</span><b id="statMerge">—</b></div>
+      </div>
+      <div class="sub-hint" id="quantHint">黄色刻度是预览目标；应用后才会改写音符。</div>
+    </section>
+
     <div class="sidebar-foot">
       <button id="btnHelp2" class="link">使用说明与快捷键 · ?</button>
     </div>
@@ -706,13 +805,6 @@
       <button data-mode="play" class="on">演奏</button>
       <button data-mode="edit">编辑</button>
     </div>
-    <select id="snapSelect" title="网格吸附（需要先填写 BPM）">
-      <option value="off">吸附：关</option>
-      <option value="1">吸附：1 拍</option>
-      <option value="2">吸附：1/2</option>
-      <option value="4">吸附：1/4</option>
-      <option value="8">吸附：1/8</option>
-    </select>
     <button id="btnMetro" class="toggle" title="播放时按 BPM 打拍点">节拍器</button>
     <button id="btnTick" class="toggle on" title="创建音符时播放确认提示音">提示音</button>
     <button id="btnCalib" title="测量并补偿按键延迟">延迟校准 <span id="offsetLabel">0 ms</span></button>
@@ -729,14 +821,14 @@
 
 <dialog id="metaDlg" aria-labelledby="metaTitle">
   <div class="dlg-head">
-    <h2 id="metaTitle">曲目信息 / 导出</h2>
+    <h2 id="metaTitle">打包与导出</h2>
     <button class="icon" data-close="metaDlg" aria-label="关闭">✕</button>
   </div>
   <div class="dlg-body">
     <div class="meta-grid">
       <label for="metaId">曲目 ID</label>
       <input type="text" id="metaId" placeholder="my_song" spellcheck="false" autocomplete="off">
-      <div class="hint">同时作为 music pack 的目录名与文件名，建议用小写字母、数字和下划线。</div>
+      <div class="hint">同时作为 .tmbp 的文件名，建议用小写字母、数字和下划线。</div>
 
       <label for="metaZh">中文名</label>
       <input type="text" id="metaZh" placeholder="曲目名" autocomplete="off">
@@ -756,16 +848,24 @@
     </div>
 
     <div class="callout" id="metaSummary"></div>
+
+    <div class="pack-box">
+      <div class="pack-line"><span>音频编码</span><b id="packAudioPlan">自动：Opus 96 kbps</b></div>
+      <div class="pack-line"><span>输出文件</span><b id="packOutName">—</b></div>
+      <div class="pack-progress" id="packProgress" hidden><i id="packProgressBar"></i></div>
+    </div>
+
     <div class="callout" style="margin-top:8px">
-      BPM 在右侧「曲目」卡片里调整；导出的两个 json 放进
-      <code>packs/&lt;曲目ID&gt;/</code>，再与音频一起打包：
-      <br><code>python tools/make_pack.py --src packs/&lt;曲目ID&gt; --audio 音频文件</code>
+      打包会生成一个 <code>.tmbp</code>（zip：<code>manifest.json</code> + <code>chart.json</code> + 音频），
+      放进游戏根目录的 <code>external_songs/</code>，音游的「外部音乐」分组里就能选到。
+      BPM 与网格在右侧「网格 / 对齐」卡片里调整。
     </div>
   </div>
   <div class="dlg-foot">
     <span class="left" id="metaMsg" style="color:var(--faint);font-size:11px">导出不会关闭这个窗口</span>
-    <button id="btnExportManifest">导出 manifest.json</button>
-    <button id="btnExportChart" class="primary">导出 chart.json</button>
+    <button id="btnExportManifest" title="只导出 manifest.json（调试 / 备份）">manifest.json</button>
+    <button id="btnExportChart" title="只导出 chart.json（调试 / 备份）">chart.json</button>
+    <button id="btnBuildPack" class="primary" title="编码音频并打包成 .tmbp">打包 .tmbp</button>
   </div>
 </dialog>
 
@@ -782,8 +882,8 @@
           <div class="step"><em>1</em><b>载入音频</b><span>拖入窗口，或点顶栏「载入音频」</span></div>
           <div class="step"><em>2</em><b>校准延迟</b><span>跟着 16 下节拍敲键，补偿输出与反应</span></div>
           <div class="step"><em>3</em><b>演奏放音</b><span>空格播放，A S D J K L 跟着音乐放音符</span></div>
-          <div class="step"><em>4</em><b>编辑微调</b><span>Tab 切卷帘，拖动改时间 / 轨道</span></div>
-          <div class="step"><em>5</em><b>导出打包</b><span>两个 json 放进 packs/&lt;id&gt;/ 后打包</span></div>
+          <div class="step"><em>4</em><b>网格对齐</b><span>Tab 切时间轴，调格距 / 相位，量化全部</span></div>
+          <div class="step"><em>5</em><b>打包 .tmbp</b><span>「打包 / 导出」一键生成音乐包</span></div>
         </div>
       </section>
 
@@ -811,17 +911,18 @@
         <h3>几点细节</h3>
         <p><b>校准</b>：测得的是「音频输出延迟 + 你的反应延迟」。降速作谱时，反应分量会按速率缩放，输出延迟不变，所以音符始终落在你听到的位置。</p>
         <p><b>暂停中放音符</b>：直接落在播放头位置，不再扣除反应延迟；想精确对齐时，暂停后放音符更可靠。</p>
-        <p><b>吸附</b>：按 BPM 的整数分割计算。BPM 填错时，卷帘上的网格会跟着错，先对一下节拍器。</p>
+        <p><b>网格</b>：格距按 BPM 的整数分割算（1 拍 / 1/2 / 1/4 / 1/8 拍），相位把整张网格左右挪。BPM 填错时网格会跟着错，先对一下节拍器。</p>
+        <p><b>量化</b>：黄色刻度是预览目标，拖动「强度」可以让音符只向网格靠一部分；「量化全部」才真正改写时间，可 Ctrl+Z 撤销。同轨落在同一时间点的重复音符会被合并。</p>
+        <p><b>偏移</b>：正数把音符整体往后推，用来修「整体早/晚」；「仅偏移」只应用偏移，不动网格。</p>
         <p><b>草稿</b>：按「文件名 + 时长」自动保存在浏览器里，重新选同一个音频即可恢复；换设备不会同步。</p>
         <p><b>m4s</b>：浏览器解不了 B 站分段容器，先转封装：
           <code>ffmpeg -i in.m4s -c:a copy out.m4a</code></p>
-        <p><b>导出</b>：<code>chart.json</code> 是「时间 + 轨道」数组，
-          <code>manifest.json</code> 里的 <code>audio</code> 字段会在打包时被 make_pack.py 替换。</p>
+        <p><b>打包</b>：生成 <code>.tmbp</code>（zip 内含 <code>manifest.json</code>、<code>chart.json</code>、音频），丢进游戏根目录的 <code>external_songs/</code> 即可。音频优先编成 Opus 96 kbps；浏览器不支持 WebCodecs 时退回原文件，再不行退回 WAV。打包好的包可以直接用顶栏「音乐包」重新打开继续改。</p>
       </section>
 
       <section class="help-section">
         <h3>图标</h3>
-        <p>终端音乐盒 · Terminal Music Box，纯 Python 标准库音游。这个页面是 <code>tools/chart_studio.html</code>，零依赖、单文件，所有数据都留在本机。</p>
+        <p>终端音乐盒 · Terminal Music Box，纯 Python 标准库音游。这个页面是 <code>tools/chart_studio.html</code>，作谱、对齐、打包三件事都在这一页里完成；零依赖、单文件，所有数据都留在本机。</p>
       </section>
     </div>
   </div>
@@ -879,6 +980,7 @@ window.addEventListener("unhandledrejection", (e) => window.__errors.push(String
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const round3 = (v) => Math.round(v * 1000) / 1000;
+const round6 = (v) => Math.round(v * 1e6) / 1e6;
 const laneColor = (lane, a = 1) => {
   const c = LANE_RGB[lane] || [255, 255, 255];
   return `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${a})`;
@@ -888,6 +990,11 @@ const median = (arr) => {
   const s = [...arr].sort((a, b) => a - b);
   const k = s.length >> 1;
   return s.length % 2 ? s[k] : (s[k - 1] + s[k]) / 2;
+};
+const percentile = (arr, p) => {
+  if (!arr.length) return 0;
+  const s = [...arr].sort((a, b) => a - b);
+  return s[clamp(Math.round(p * (s.length - 1)), 0, s.length - 1)];
 };
 function fmtTime(t) {
   if (!isFinite(t) || t < 0) t = 0;
@@ -928,6 +1035,9 @@ const state = {
   bpm: 120,
   snap: false,
   snapDiv: 4,
+  phase: 0,
+  shift: 0,
+  strength: 1,
   offsetMs: 0,
   speed: 1,
   volume: 0.9,
@@ -948,6 +1058,7 @@ const audio = {
   ctx: null, buffer: null, src: null, gain: null,
   startCtx: 0, startPos: 0, playing: false,
   name: "", duration: 0, peaks: null,
+  raw: null,          // {name, ext, bytes}: the source file, kept for packing
 };
 const hist = { undo: [], redo: [] };
 const viewSize = { w: 0, h: 0 };
@@ -989,14 +1100,19 @@ function loadSettings() {
     state.snap = s.snap;
     state.snapDiv = [1, 2, 4, 8].includes(+s.snapDiv) ? +s.snapDiv : 4;
   }
+  if (Number.isFinite(+s.phase)) state.phase = clamp(+s.phase, 0, 2);
 }
 function saveSettings() {
   storageSet(STORE_SETTINGS, JSON.stringify({
     offsetMs: state.offsetMs, bpm: state.bpm, speed: state.speed,
     volume: state.volume, tick: state.tick, snap: state.snap, snapDiv: state.snapDiv,
+    phase: state.phase,
   }));
 }
 function draftKey() {
+  // Pack audio members are all called audio.ogg/audio.wav, so packs key their
+  // draft by song id instead — otherwise two packs of equal length collide.
+  if (audio.draftKey) return STORE_DRAFT + audio.draftKey;
   return STORE_DRAFT + (audio.name || "") + "|" + Math.round((audio.duration || 0) * 10);
 }
 function saveDraftSoon() {
@@ -1015,6 +1131,7 @@ function saveDraftNow() {
     offsetMs: state.offsetMs,
     snap: state.snap,
     snapDiv: state.snapDiv,
+    phase: state.phase,
     savedAt: Date.now(),
   };
   storageSet(draftKey(), JSON.stringify(payload));
@@ -1046,7 +1163,8 @@ function restoreDraft() {
     if (typeof d.snap === "boolean") {
       state.snap = d.snap;
       state.snapDiv = [1, 2, 4, 8].includes(+d.snapDiv) ? +d.snapDiv : 4;
-      syncSnapUI();
+      if (Number.isFinite(+d.phase)) state.phase = clamp(+d.phase, 0, 2);
+      syncGridUI();
     }
     return notes.length > 0;
   } catch (err) {
@@ -1208,6 +1326,7 @@ function setBpm(v, syncInput = true) {
   state.bpm = clamp(+v || 120, 20, 300);
   if (syncInput && document.activeElement !== $("bpmInput")) $("bpmInput").value = state.bpm;
   metroReset();
+  syncGridUI();
   needsDraw = true;
   needsOv = true;
   saveSettings();
@@ -1342,10 +1461,156 @@ function redo() {
   restoreNotesJSON(next);
   updateHistoryButtons();
 }
-function snapTime(t) {
-  if (!state.snap) return Math.max(0, t);
-  const step = beatSec() / state.snapDiv;
-  return Math.max(0, Math.round(t / step) * step);
+/* ================================================================== 网格 / 对齐 */
+/* One grid does three jobs: it snaps note placement and dragging, it draws the
+   ruler lines, and "量化全部" pulls every note onto it. The unit follows the
+   BPM; the phase slides the whole grid sideways so a performance that sits
+   consistently late still lands on whole beats. Nothing here rewrites a note
+   until the user applies it — the yellow ticks are only a preview. */
+function gridUnit() {
+  if (!state.snap) return 0;
+  return beatSec() / state.snapDiv;
+}
+function gridSnap(t) {
+  const u = gridUnit();
+  if (!(u > 0)) return Math.max(0, t);
+  const ph = clamp(state.phase, 0, u);
+  return Math.max(0, ph + Math.round((t - ph) / u) * u);
+}
+function targetFor(t) {
+  // Offset first (a whole-chart nudge), then the grid, then the strength lerp:
+  // 100% lands on the grid, 50% moves halfway, 0% leaves the note untouched.
+  const u = gridUnit();
+  if (!(u > 0)) return round6(Math.max(0, t + state.shift * state.strength));
+  const snapped = gridSnap(Math.max(0, t + state.shift));
+  return round6(Math.max(0, t + state.strength * (snapped - t)));
+}
+function snapTime(t) { return gridSnap(t); }
+function setPhase(sec) {
+  const u = gridUnit();
+  state.phase = clamp(+sec || 0, 0, u > 0 ? u : 2);
+  syncGridUI();
+  updateAlignStats();
+  needsDraw = true;
+}
+function autoPhase() {
+  const u = gridUnit();
+  if (!state.notes.length || !(u > 0)) { setPhase(0); return; }
+  // Circular mean of the note times modulo the unit: the phase that makes the
+  // most notes land on grid lines with the least total movement.
+  let sx = 0;
+  let sy = 0;
+  for (const n of state.notes) {
+    const a = (2 * Math.PI * n.t) / u;
+    sx += Math.cos(a);
+    sy += Math.sin(a);
+  }
+  let p = (Math.atan2(sy, sx) / (2 * Math.PI)) * u;
+  p = ((p % u) + u) % u;
+  setPhase(p);
+}
+function setOffset(ms) {
+  state.shift = clamp(+ms || 0, -200, 200) / 1000;
+  syncGridUI();
+  updateAlignStats();
+  needsDraw = true;
+}
+function setStrength(pct) {
+  state.strength = clamp(+pct || 0, 0, 100) / 100;
+  syncGridUI();
+  updateAlignStats();
+  needsDraw = true;
+}
+function alignStats() {
+  const notes = state.notes;
+  const gridOn = gridUnit() > 0;
+  const current = gridOn ? notes.map((n) => Math.abs(n.t - gridSnap(n.t))) : [];
+  const targets = notes.map((n) => targetFor(n.t));
+  const moves = targets.map((t, i) => Math.abs(t - notes[i].t));
+  const previewDevs = gridOn ? targets.map((t) => Math.abs(t - gridSnap(t))) : [];
+  const curUnique = new Set(notes.map((n) => round3(n.t))).size;
+  const targetUnique = new Set(targets.map((t) => round3(t))).size;
+  const seen = new Set();
+  let dup = 0;
+  targets.forEach((t, i) => {
+    const key = `${round3(t)}|${notes[i].lane}`;
+    if (seen.has(key)) dup++;
+    else seen.add(key);
+  });
+  const pending = notes.some((n) => Math.abs(targetFor(n.t) - n.t) > 1e-6);
+  return { notes, gridOn, current, moves, previewDevs, merged: Math.max(0, curUnique - targetUnique), dup, pending };
+}
+function updateAlignStats() {
+  if (!($("statCurrent"))) return;   // called before the shell is ready
+  const s = alignStats();
+  const n = s.notes.length;
+  const med = (list) => `${(median(list) * 1000).toFixed(1)} / ${(percentile(list, 0.9) * 1000).toFixed(1)} ms`;
+  $("statCurrent").textContent = n && s.gridOn ? med(s.current) : "—";
+  $("statPreview").textContent = n ? med(s.moves) : "—";
+  const bands = [0.01, 0.02, 0.03].map((thr) => {
+    const list = s.gridOn ? s.previewDevs : s.moves;
+    return list.length ? Math.round((list.filter((d) => d <= thr).length / list.length) * 100) : 0;
+  });
+  $("statBands").textContent = n ? `${bands[0]} / ${bands[1]} / ${bands[2]}%` : "—";
+  $("statMerge").textContent = n ? `${s.merged} 个${s.dup ? ` · ${s.dup} 重复` : ""}` : "—";
+  const chip = $("dirtyChip");
+  chip.hidden = !s.pending;
+  chip.textContent = "未应用";
+  $("btnQuantize").disabled = !n || !s.gridOn;
+  $("btnShift").disabled = !n || !state.shift;
+  $("quantHint").classList.toggle("warn", s.merged > 0 || s.dup > 0);
+  $("quantHint").textContent = !n
+    ? "放几个音符后，这里显示量化预览。"
+    : !s.gridOn
+      ? "网格关着：时间不做吸附，仍可用「仅偏移」修整体早晚。"
+      : (s.merged > 0 || s.dup > 0)
+        ? `应用会合并 ${s.merged} 个时间点${s.dup ? `，并去掉 ${s.dup} 个同轨重复` : ""}。黄色刻度是预览目标。`
+        : "黄色刻度是预览目标；应用后才会改写音符。";
+  needsDraw = true;
+}
+function pruneGroups() {
+  const counts = {};
+  for (const n of state.notes) if (n.group) counts[n.group] = (counts[n.group] || 0) + 1;
+  for (const n of state.notes) if (n.group && counts[n.group] < 2) n.group = null;
+}
+function applyQuantize() {
+  if (!state.notes.length) { toast("还没有音符"); return; }
+  if (!(gridUnit() > 0)) { toast("先在「网格 / 对齐」里打开网格", "error"); return; }
+  const targets = state.notes.map((n) => targetFor(n.t));
+  const seen = new Set();
+  const out = [];
+  let dropped = 0;
+  state.notes.forEach((n, i) => {
+    const key = `${round3(targets[i])}|${n.lane}`;
+    if (seen.has(key)) { dropped++; return; }
+    seen.add(key);
+    out.push({ ...n, t: round3(targets[i]) });
+  });
+  const merged = Math.max(0,
+    new Set(state.notes.map((n) => round3(n.t))).size
+    - new Set(targets.map((t) => round3(t))).size);
+  pushUndo();
+  state.notes = out.sort((a, b) => a.t - b.t || a.lane - b.lane);
+  pruneGroups();
+  state.sel = null;
+  state.linkPick = null;
+  state.shift = 0;
+  state.strength = 1;
+  afterChange();
+  toast(`已量化 ${state.notes.length} 个音符${dropped ? ` · 去掉 ${dropped} 个同轨重复` : ""}${merged ? ` · 合并 ${merged} 个时间点` : ""}`);
+}
+function applyShift() {
+  if (!state.notes.length) { toast("还没有音符"); return; }
+  if (!state.shift) { toast("整体偏移是 0"); return; }
+  const ms = Math.round(state.shift * 1000);
+  pushUndo();
+  state.notes = state.notes
+    .map((n) => ({ ...n, t: round3(Math.max(0, n.t + state.shift)) }))
+    .sort((a, b) => a.t - b.t || a.lane - b.lane);
+  state.sel = null;
+  state.shift = 0;
+  afterChange();
+  toast(`已整体偏移 ${ms >= 0 ? "+" : ""}${ms} ms`);
 }
 function placeNote(lane) {
   if (!audio.buffer) { toast("先载入音频，或点「示范音」试用"); return; }
@@ -1523,6 +1788,8 @@ function afterChange({ song = true } = {}) {
   updateHistoryButtons();
   renderSelection();
   if (song) renderSong();
+  updateAlignStats();
+  updatePackPlan();
   saveDraftSoon();
 }
 function renderAll() {
@@ -1530,7 +1797,7 @@ function renderAll() {
   renderSelection();
   updateHistoryButtons();
   updateStatus();
-  syncSnapUI();
+  syncGridUI();
   syncModeUI();
   setOffsetLabel();
 }
@@ -1615,8 +1882,26 @@ function renderSelection() {
 function setOffsetLabel() {
   $("offsetLabel").textContent = `${state.offsetMs >= 0 ? "" : "−"}${Math.abs(state.offsetMs)} ms`;
 }
-function syncSnapUI() {
+function syncGridUI() {
+  const u = gridUnit();
+  state.phase = clamp(state.phase, 0, u > 0 ? u : 2);
   $("snapSelect").value = state.snap ? String(state.snapDiv) : "off";
+  const uMs = u > 0 ? u * 1000 : 2000;
+  const phMs = clamp(state.phase, 0, u > 0 ? u : 2) * 1000;
+  const offMs = Number((state.shift * 1000).toFixed(1));
+  $("phaseMs").max = uMs.toFixed(3);
+  $("phaseRange").max = uMs.toFixed(3);
+  if (document.activeElement !== $("phaseMs")) $("phaseMs").value = phMs.toFixed(1);
+  if (document.activeElement !== $("phaseRange")) $("phaseRange").value = String(Number(phMs.toFixed(1)));
+  if (document.activeElement !== $("offsetMs")) $("offsetMs").value = String(offMs);
+  if (document.activeElement !== $("offsetRange")) $("offsetRange").value = String(offMs);
+  $("strength").value = String(Math.round(state.strength * 100));
+  $("strengthVal").textContent = `${Math.round(state.strength * 100)}%`;
+  const bpm = String(Number(state.bpm.toFixed(1)));
+  $("gridHint").textContent = u > 0
+    ? `一格 ${(u * 1000).toFixed(1)} ms · BPM ${bpm} 的 1/${state.snapDiv} 拍 · 相位把整张网格左右挪`
+    : `网格已关：音符落在自由时间上 · 当前 BPM ${bpm}`;
+  updateAlignStats();
 }
 function syncModeUI() {
   document.body.classList.toggle("mode-edit", state.mode === "edit");
@@ -1954,6 +2239,7 @@ function drawEdit(L) {
   drawGrid(L);
   drawWave(L);
   drawEditNotes(L);
+  drawTargets(L);
   drawRulerLabels(L);
 
   const px = L.xOf(p);
@@ -1987,42 +2273,31 @@ function drawEdit(L) {
 }
 function drawGrid(L) {
   const { plotX, plotW, ruler, waveTop, t0, pps } = L;
-  const b = beatSec();
-  const t1 = t0 + plotW / pps;
-  const spacing = b * pps;
+  const u = gridUnit();
+  if (!(u > 0)) return;
+  const spacing = u * pps;
   if (!isFinite(spacing) || spacing <= 0) return;
-
-  if (spacing >= 7) {
-    const i0 = Math.max(0, Math.floor(t0 / b));
-    const i1 = Math.ceil(t1 / b);
-    for (let i = i0; i <= i1; i++) {
-      const t = i * b;
-      const x = Math.round(L.xOf(t)) + 0.5;
-      if (x < plotX - 1 || x > plotX + plotW + 1) continue;
-      const bar = i % 4 === 0;
-      ctx.strokeStyle = bar ? "rgba(255,255,255,.085)" : "rgba(255,255,255,.032)";
-      ctx.beginPath();
-      ctx.moveTo(x, ruler);
-      ctx.lineTo(x, waveTop);
-      ctx.stroke();
-    }
-  }
-  if (state.snap && state.snapDiv > 1) {
-    const sub = b / state.snapDiv;
-    if (sub * pps >= 9) {
-      const i0 = Math.max(0, Math.floor(t0 / sub));
-      const i1 = Math.ceil(t1 / sub);
-      ctx.strokeStyle = "rgba(255,255,255,.018)";
-      for (let i = i0; i <= i1; i++) {
-        if (i % state.snapDiv === 0) continue;
-        const x = Math.round(L.xOf(i * sub)) + 0.5;
-        if (x < plotX || x > plotX + plotW) continue;
-        ctx.beginPath();
-        ctx.moveTo(x, ruler);
-        ctx.lineTo(x, waveTop);
-        ctx.stroke();
-      }
-    }
+  const ph = clamp(state.phase, 0, u);
+  const t1 = t0 + plotW / pps;
+  const i0 = Math.floor((t0 - ph) / u) - 1;
+  const i1 = Math.ceil((t1 - ph) / u) + 1;
+  const beatEvery = state.snapDiv;          // one beat = snapDiv cells
+  const barEvery = beatEvery * 4;
+  for (let i = i0; i <= i1; i++) {
+    const t = ph + i * u;
+    if (t < 0) continue;
+    const x = Math.round(L.xOf(t)) + 0.5;
+    if (x < plotX - 1 || x > plotX + plotW + 1) continue;
+    const bar = i % barEvery === 0;
+    const beat = i % beatEvery === 0;
+    if (!bar && !beat && spacing < 4) continue;
+    ctx.strokeStyle = bar ? "rgba(255,255,255,.115)"
+      : beat ? "rgba(255,255,255,.07)"
+        : "rgba(255,255,255,.022)";
+    ctx.beginPath();
+    ctx.moveTo(x, ruler);
+    ctx.lineTo(x, waveTop);
+    ctx.stroke();
   }
 }
 function drawWave(L) {
@@ -2122,6 +2397,40 @@ function drawEditNotes(L) {
     ctx.moveTo(x, L.laneCenter(l0));
     ctx.lineTo(x, L.laneCenter(l1));
     ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawTargets(L) {
+  if (!(gridUnit() > 0) || !state.notes.length) return;
+  const nh = Math.max(5, Math.min(L.rowH - 10, 14));
+  ctx.save();
+  ctx.lineCap = "round";
+  for (const n of state.notes) {
+    const t = targetFor(n.t);
+    if (Math.abs(t - n.t) < 0.0005) continue;
+    const x1 = L.xOf(t);
+    if (x1 < L.plotX - 12 || x1 > L.plotX + L.plotW + 12) continue;
+    const x0 = L.xOf(n.t);
+    const cy = L.laneCenter(n.lane);
+    ctx.strokeStyle = "rgba(255,207,92,.24)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x0, cy);
+    ctx.lineTo(x1, cy);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,207,92,.8)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x1, cy - nh / 2);
+    ctx.lineTo(x1, cy + nh / 2);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(255,207,92,.9)";
+    ctx.beginPath();
+    ctx.moveTo(x1 - 3, cy - nh / 2 - 3);
+    ctx.lineTo(x1 + 3, cy - nh / 2 - 3);
+    ctx.lineTo(x1, cy - nh / 2);
+    ctx.closePath();
+    ctx.fill();
   }
   ctx.restore();
 }
@@ -2571,9 +2880,14 @@ async function loadAudioFile(file) {
   showBusy(looksSegment ? "解码中…（.m4s 可能解不了）" : `解码 ${file.name}…`);
   try {
     const ab = await file.arrayBuffer();
+    // Keep the encoded source around: packing falls back to it verbatim when
+    // WebCodecs cannot encode Opus.
+    const raw = new Uint8Array(ab.slice(0));
     const buf = await c.decodeAudioData(ab);
     if (token !== loadToken) return;
     initBuffer(buf, file.name);
+    audio.raw = { name: file.name, ext: (/\.[^.]+$/.exec(file.name) || [""])[0], bytes: raw };
+    updatePackPlan();
   } catch (err) {
     if (token !== loadToken) return;
     console.warn("[studio] decode failed", err);
@@ -2582,12 +2896,14 @@ async function loadAudioFile(file) {
     if (token === loadToken) hideBusy();
   }
 }
-function initBuffer(buf, name, metaOverride, bpmDefault) {
+function initBuffer(buf, name, metaOverride, bpmDefault, opts = {}) {
   saveDraftNow();
   stopSrc();
   audio.buffer = buf;
   audio.duration = buf.duration;
   audio.name = name;
+  audio.raw = null;
+  audio.draftKey = opts.draftKey || "";
   audio.startPos = 0;
   audio.playing = false;
   audio.src = null;
@@ -2610,15 +2926,20 @@ function initBuffer(buf, name, metaOverride, bpmDefault) {
     state.bpm = clamp(bpmDefault, 20, 300);
     $("bpmInput").value = state.bpm;
   }
-  const restored = restoreDraft();
+  // A pack brings its own chart and metadata, so its draft is not restored —
+  // only autosaved, under the song id (see draftKey()).
+  const restored = opts.restoreDraft === false ? false : restoreDraft();
   syncAudioUI();
   renderAll();
   syncPlayButton();
+  updatePackPlan();
   needsDraw = true;
   needsOv = true;
-  toast(restored
-    ? `已恢复这首曲子的草稿：${state.notes.length} 个音符`
-    : "音频已载入 · 空格播放，A S D J K L 放音符");
+  if (!opts.quiet) {
+    toast(restored
+      ? `已恢复这首曲子的草稿：${state.notes.length} 个音符`
+      : "音频已载入 · 空格播放，A S D J K L 放音符");
+  }
 }
 function renderDemoBuffer() {
   const c = audio.ctx;
@@ -2794,20 +3115,7 @@ function chartText() {
   return JSON.stringify({ version: 1, notes }, null, 0) + "\n";
 }
 function manifestText() {
-  const m = state.meta;
-  const id = String(m.id || "").trim() || slugify(m.titleEn || m.titleZh) || "my_song";
-  return JSON.stringify({
-    format: 1,
-    id,
-    title_zh: m.titleZh || id,
-    title_en: m.titleEn || m.titleZh || id,
-    artist: m.artist || "",
-    audio: "audio.bin",
-    duration: round3(duration()),
-    offset: 0,
-    lead_in: clamp(+m.leadIn || 2, 0.5, 10),
-    difficulty: m.difficulty || "Normal",
-  }, null, 1);
+  return JSON.stringify(packManifest("audio.bin"), null, 1);
 }
 function download(text, name) {
   const blob = new Blob([text], { type: "application/json" });
@@ -2897,6 +3205,535 @@ async function importChartFile(file) {
   }
 }
 
+/* ================================================================== 打包 (.tmbp) */
+/* A .tmbp is a plain zip: manifest.json + chart.json + one audio member, and
+   the game reads it with zipfile + ffmpeg. So the browser only has to produce a
+   valid store-only zip plus audio ffmpeg can decode:
+
+     1. Opus in Ogg, 96 kbps mono (WebCodecs AudioEncoder + a tiny muxer) —
+        the same ballpark as the old CLI packer, and Chrome/Edge have it;
+     2. otherwise the source file is embedded untouched;
+     3. a synthesized demo with no source file falls back to WAV at the engine's
+        own 44.1 kHz mono s16, which the game decodes without ffmpeg at all.  */
+const PACK_FORMAT = 1;
+const PACK_OPUS_RATE = 48000;
+const PACK_OPUS_BITRATE = 96000;
+const PACK_FRAME = 960;                 // 20 ms at 48 kHz
+const ZIP_UTF8_FLAG = 0x0800;
+const PACK_AUDIO_RATE = 44100;          // tmb.audio.engine's own rate
+
+function utf8Bytes(text) { return new TextEncoder().encode(text); }
+function concatBytes(parts) {
+  let size = 0;
+  for (const p of parts) size += p.length;
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const p of parts) { out.set(p, at); at += p.length; }
+  return out;
+}
+
+/* ---------------------------------------------------------- zip (store only) */
+let zipCrcTable = null;
+function zipCrc32(bytes) {
+  if (!zipCrcTable) {
+    zipCrcTable = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      zipCrcTable[n] = c >>> 0;
+    }
+  }
+  let c = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) c = zipCrcTable[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+function zipStore(files) {
+  const enc = new TextEncoder();
+  const now = new Date();
+  const dosTime = ((now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1)) & 0xffff;
+  const dosDate = (((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate()) & 0xffff;
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name);
+    const data = f.bytes;
+    const crc = zipCrc32(data);
+    const local = new Uint8Array(30 + name.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, ZIP_UTF8_FLAG, true);
+    lv.setUint16(8, 0, true);                 // store
+    lv.setUint16(10, dosTime, true);
+    lv.setUint16(12, dosDate, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, data.length, true);
+    lv.setUint32(22, data.length, true);
+    lv.setUint16(26, name.length, true);
+    lv.setUint16(28, 0, true);
+    local.set(name, 30);
+    locals.push(local, data);
+
+    const cd = new Uint8Array(46 + name.length);
+    const cv = new DataView(cd.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, ZIP_UTF8_FLAG, true);
+    cv.setUint16(10, 0, true);
+    cv.setUint16(12, dosTime, true);
+    cv.setUint16(14, dosDate, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, data.length, true);
+    cv.setUint32(24, data.length, true);
+    cv.setUint16(28, name.length, true);
+    cv.setUint32(42, offset, true);
+    cd.set(name, 46);
+    centrals.push(cd);
+    offset += local.length + data.length;
+  }
+  const cdSize = centrals.reduce((sum, c) => sum + c.length, 0);
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, files.length, true);
+  ev.setUint16(10, files.length, true);
+  ev.setUint32(12, cdSize, true);
+  ev.setUint32(16, offset, true);
+  const out = new Uint8Array(offset + cdSize + eocd.length);
+  let at = 0;
+  for (const part of locals) { out.set(part, at); at += part.length; }
+  for (const c of centrals) { out.set(c, at); at += c.length; }
+  out.set(eocd, at);
+  return out;
+}
+
+/* ---------------------------------------------------------------- Opus / Ogg */
+let oggCrcTable = null;
+function oggCrc32(bytes) {
+  if (!oggCrcTable) {
+    oggCrcTable = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let r = i << 24;
+      for (let j = 0; j < 8; j++) r = (r & 0x80000000) ? ((r << 1) ^ 0x04c11db7) : (r << 1);
+      oggCrcTable[i] = r >>> 0;
+    }
+  }
+  let crc = 0;
+  for (let i = 0; i < bytes.length; i++) {
+    crc = ((crc << 8) ^ oggCrcTable[((crc >>> 24) ^ bytes[i]) & 0xff]) >>> 0;
+  }
+  return crc >>> 0;
+}
+function oggSegments(length) {
+  const segs = [];
+  let left = length;
+  while (left >= 255) { segs.push(255); left -= 255; }
+  segs.push(left);
+  return segs;
+}
+function oggPage(serial, seq, headerType, granule, segments, payload) {
+  const page = new Uint8Array(27 + segments.length + payload.length);
+  const dv = new DataView(page.buffer);
+  page[0] = 0x4f; page[1] = 0x67; page[2] = 0x67; page[3] = 0x53;   // "OggS"
+  page[4] = 0;                        // stream structure version
+  page[5] = headerType;
+  dv.setUint32(6, granule >>> 0, true);                     // granule low
+  dv.setUint32(10, Math.floor(granule / 0x100000000), true); // granule high
+  dv.setUint32(14, serial >>> 0, true);
+  dv.setUint32(18, seq >>> 0, true);
+  dv.setUint32(22, 0, true);          // checksum placeholder
+  page[26] = segments.length;
+  page.set(segments, 27);
+  page.set(payload, 27 + segments.length);
+  dv.setUint32(22, oggCrc32(page), true);
+  return page;
+}
+function opusHead(channels, rate) {
+  const b = new Uint8Array(19);
+  b.set([0x4f, 0x70, 0x75, 0x73, 0x48, 0x65, 0x61, 0x64], 0);  // "OpusHead"
+  b[8] = 1;                 // version
+  b[9] = channels;
+  b[10] = 0; b[11] = 0;     // pre-skip 0: keep the encoder's ramp instead of trimming
+  b[12] = rate & 0xff; b[13] = (rate >> 8) & 0xff;
+  b[14] = (rate >> 16) & 0xff; b[15] = (rate >> 24) & 0xff;
+  b[16] = 0; b[17] = 0;     // output gain
+  b[18] = 0;                // channel mapping family 0 (mono/stereo)
+  return b;
+}
+function opusTags(vendor) {
+  const v = utf8Bytes(vendor);
+  const b = new Uint8Array(8 + 4 + v.length + 4);
+  b.set([0x4f, 0x70, 0x75, 0x73, 0x54, 0x61, 0x67, 0x73], 0);  // "OpusTags"
+  const dv = new DataView(b.buffer);
+  dv.setUint32(8, v.length, true);
+  b.set(v, 12);
+  dv.setUint32(12 + v.length, 0, true);
+  return b;
+}
+function oggMux(packets, totalSamples) {
+  const serial = (Math.random() * 0x7fffffff) >>> 0;
+  const pages = [];
+  let seq = 0;
+  const head = opusHead(1, PACK_OPUS_RATE);
+  pages.push(oggPage(serial, seq++, 0x02, 0, oggSegments(head.length), head));
+  const tags = opusTags("Terminal Music Box studio");
+  pages.push(oggPage(serial, seq++, 0x00, 0, oggSegments(tags.length), tags));
+
+  let chunks = [];
+  let segs = [];
+  let bytes = 0;
+  let samples = 0;
+  const flush = (last) => {
+    if (!segs.length) return;
+    pages.push(oggPage(serial, seq++, last ? 0x04 : 0x00,
+      Math.min(samples, totalSamples), segs, concatBytes(chunks)));
+    chunks = [];
+    segs = [];
+    bytes = 0;
+  };
+  for (let i = 0; i < packets.length; i++) {
+    const seg = oggSegments(packets[i].length);
+    if (segs.length + seg.length > 255 || bytes + packets[i].length > 65000) flush(false);
+    segs.push(...seg);
+    chunks.push(packets[i]);
+    bytes += packets[i].length;
+    samples = Math.min(totalSamples, (i + 1) * PACK_FRAME);
+  }
+  flush(true);
+  return concatBytes(pages);
+}
+async function renderMonoAt(buffer, rate) {
+  const frames = Math.max(1, Math.ceil(buffer.duration * rate));
+  const offline = new OfflineAudioContext(1, frames, rate);
+  const src = offline.createBufferSource();
+  src.buffer = buffer;
+  src.connect(offline.destination);
+  src.start();
+  return (await offline.startRendering()).getChannelData(0);
+}
+async function encodeOpusOgg(buffer, onProgress) {
+  if (typeof AudioEncoder !== "function" || typeof AudioData !== "function"
+      || typeof OfflineAudioContext !== "function") {
+    throw new Error("这个浏览器没有 WebCodecs");
+  }
+  const pcm = await renderMonoAt(buffer, PACK_OPUS_RATE);
+  const packets = [];
+  let failed = null;
+  const encoder = new AudioEncoder({
+    output: (chunk) => {
+      const bytes = new Uint8Array(chunk.byteLength);
+      chunk.copyTo(bytes);
+      packets.push(bytes);
+    },
+    error: (err) => { failed = err; },
+  });
+  encoder.configure({
+    codec: "opus",
+    sampleRate: PACK_OPUS_RATE,
+    numberOfChannels: 1,
+    bitrate: PACK_OPUS_BITRATE,
+  });
+  const frame = new Float32Array(PACK_FRAME);
+  let total = 0;
+  for (let i = 0; i < pcm.length; i += PACK_FRAME) {
+    const n = Math.min(PACK_FRAME, pcm.length - i);
+    frame.fill(0);
+    frame.set(pcm.subarray(i, i + n));
+    encoder.encode(new AudioData({
+      format: "f32-planar",
+      sampleRate: PACK_OPUS_RATE,
+      numberOfFrames: PACK_FRAME,
+      numberOfChannels: 1,
+      timestamp: Math.round((i / PACK_OPUS_RATE) * 1e6),
+      data: frame.slice().buffer,
+    }));
+    total += n;
+    if (onProgress && (i / PACK_FRAME) % 8 === 0) onProgress(total / pcm.length);
+    if (encoder.encodeQueueSize > 24) {
+      await new Promise((resolve) => {
+        const timer = setInterval(() => {
+          if (encoder.encodeQueueSize < 8) { clearInterval(timer); resolve(); }
+        }, 4);
+      });
+    }
+  }
+  await encoder.flush();
+  encoder.close();
+  if (failed) throw failed;
+  if (!packets.length) throw new Error("编码器没有输出");
+  return { bytes: oggMux(packets, total), samples: total };
+}
+async function encodeWav(buffer) {
+  const pcm = await renderMonoAt(buffer, PACK_AUDIO_RATE);
+  const n = pcm.length;
+  const bytes = new Uint8Array(44 + n * 2);
+  const dv = new DataView(bytes.buffer);
+  const tag = (off, text) => { for (let i = 0; i < text.length; i++) bytes[off + i] = text.charCodeAt(i); };
+  tag(0, "RIFF"); dv.setUint32(4, 36 + n * 2, true); tag(8, "WAVE");
+  tag(12, "fmt "); dv.setUint32(16, 16, true);
+  dv.setUint16(20, 1, true);                    // PCM
+  dv.setUint16(22, 1, true);                    // mono
+  dv.setUint32(24, PACK_AUDIO_RATE, true);
+  dv.setUint32(28, PACK_AUDIO_RATE * 2, true);  // byte rate
+  dv.setUint16(32, 2, true);                    // block align
+  dv.setUint16(34, 16, true);                   // bits
+  tag(36, "data"); dv.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) {
+    const v = clamp(pcm[i], -1, 1);
+    dv.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+  }
+  return bytes;
+}
+async function encodePackAudio(onProgress) {
+  try {
+    const opus = await encodeOpusOgg(audio.buffer, onProgress);
+    return { name: "audio.ogg", bytes: opus.bytes, codec: "Opus 96 kbps" };
+  } catch (err) {
+    console.warn("[studio] opus encode unavailable, falling back", err);
+  }
+  if (audio.raw && audio.raw.bytes && audio.raw.bytes.length) {
+    return { name: `audio${audio.raw.ext || ".bin"}`, bytes: audio.raw.bytes, codec: "原始音频文件" };
+  }
+  if (onProgress) onProgress(0.6);
+  return { name: "audio.wav", bytes: await encodeWav(audio.buffer), codec: "WAV 44.1 kHz" };
+}
+
+/* ------------------------------------------------------------ pack assembly */
+function packId() {
+  return String(state.meta.id || "").trim()
+    || slugify(state.meta.titleEn || state.meta.titleZh) || "my_song";
+}
+function packChart() {
+  const notes = state.notes
+    .map((n) => [round3(n.t), n.lane])
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  return { version: 1, notes };
+}
+function validateForPack(notes) {
+  if (!notes.length) return "还没有音符，先放几个吧";
+  let last = -1;
+  for (const [t, lane] of notes) {
+    if (!(t >= 0)) return "有音符的时间是负数";
+    if (!Number.isInteger(lane) || lane < 0 || lane > LANES - 1) return "有音符的轨道不在 A–L 里";
+    if (t < last) return "音符时间没有排好序";
+    last = t;
+  }
+  const dur = duration();
+  // Container metadata can undershoot the decodable length by a frame, so a
+  // small overshoot is legitimate (the old CLI packer used the same rule).
+  if (dur > 0 && last > dur + 2.0) {
+    return `谱面结束在 ${last.toFixed(2)}s，但音频只有 ${dur.toFixed(2)}s`;
+  }
+  return "";
+}
+function packManifest(audioName) {
+  const m = state.meta;
+  const id = packId();
+  return {
+    format: PACK_FORMAT,
+    id,
+    title_zh: m.titleZh || id,
+    title_en: m.titleEn || m.titleZh || id,
+    artist: m.artist || "",
+    audio: audioName,
+    duration: round3(duration()),
+    offset: 0,
+    lead_in: clamp(+m.leadIn || 2, 0.5, 10),
+    difficulty: m.difficulty || "Normal",
+    volume: 1.0,
+  };
+}
+async function buildPackBytes(onProgress = () => {}) {
+  if (!audio.buffer) throw new Error("先载入音频，或点「示范音」试用");
+  const chart = packChart();
+  const bad = validateForPack(chart.notes);
+  if (bad) throw new Error(bad);
+  onProgress(0.01);
+  const enc = await encodePackAudio((frac) => onProgress(0.01 + frac * 0.92));
+  onProgress(0.95);
+  const manifest = packManifest(enc.name);
+  const bytes = zipStore([
+    { name: "manifest.json", bytes: utf8Bytes(JSON.stringify(manifest, null, 1)) },
+    { name: "chart.json", bytes: utf8Bytes(JSON.stringify(chart)) },
+    { name: enc.name, bytes: enc.bytes },
+  ]);
+  onProgress(1);
+  return { bytes, manifest, chart, codec: enc.codec };
+}
+function downloadBytes(bytes, name, type = "application/octet-stream") {
+  const blob = new Blob([bytes], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+    a.remove();
+  }, 800);
+}
+
+/* -------------------------------------------------------------- pack import */
+async function inflateRaw(bytes) {
+  if (typeof DecompressionStream !== "function") throw new Error("这个浏览器解不开压缩包");
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+async function readZip(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const dv = new DataView(bytes.buffer);
+  let eocd = -1;
+  const floor = Math.max(0, bytes.length - 0xffff - 22);
+  for (let i = bytes.length - 22; i >= floor; i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("不是 zip 文件");
+  const count = dv.getUint16(eocd + 10, true);
+  let at = dv.getUint32(eocd + 16, true);
+  const dec = new TextDecoder();
+  const files = {};
+  for (let n = 0; n < count; n++) {
+    if (dv.getUint32(at, true) !== 0x02014b50) throw new Error("zip 中央目录损坏");
+    const method = dv.getUint16(at + 10, true);
+    const compSize = dv.getUint32(at + 20, true);
+    const nameLen = dv.getUint16(at + 28, true);
+    const extraLen = dv.getUint16(at + 30, true);
+    const commentLen = dv.getUint16(at + 32, true);
+    const localAt = dv.getUint32(at + 42, true);
+    const name = dec.decode(bytes.subarray(at + 46, at + 46 + nameLen));
+    const start = localAt + 30 + dv.getUint16(localAt + 26, true) + dv.getUint16(localAt + 28, true);
+    const raw = bytes.subarray(start, start + compSize);
+    files[name] = method === 0 ? raw : await inflateRaw(raw);
+    at += 46 + nameLen + extraLen + commentLen;
+  }
+  return files;
+}
+async function loadPackFile(file) {
+  if (!file) return;
+  const c = ensureCtx();
+  if (!c) return;
+  if (audio.playing) pause();
+  showBusy(`打开 ${file.name}…`);
+  try {
+    const files = await readZip(await file.arrayBuffer());
+    const need = (name) => {
+      if (!files[name]) throw new Error(`包里缺少 ${name}`);
+      return files[name];
+    };
+    const dec = new TextDecoder();
+    const manifest = JSON.parse(dec.decode(need("manifest.json")));
+    const chart = JSON.parse(dec.decode(need("chart.json")));
+    const audioName = String(manifest.audio || "");
+    const audioBytes = need(audioName);
+    let buffer;
+    try {
+      buffer = await c.decodeAudioData(audioBytes.slice().buffer);
+    } catch (err) {
+      throw new Error("包里的音频浏览器解不了（换成 m4a / mp3 再打包）");
+    }
+    const meta = {
+      id: String(manifest.id || ""),
+      titleZh: String(manifest.title_zh || ""),
+      titleEn: String(manifest.title_en || ""),
+      artist: String(manifest.artist || ""),
+      difficulty: String(manifest.difficulty || "Normal"),
+      leadIn: clamp(+(manifest.lead_in != null ? manifest.lead_in : 2) || 2, 0.5, 10),
+    };
+    initBuffer(buffer, audioName, meta, null, {
+      draftKey: `pack:${meta.id || audioName}|${Math.round(buffer.duration * 10)}`,
+      restoreDraft: false,
+      quiet: true,
+    });
+    audio.raw = {
+      name: audioName,
+      ext: (/\.[^.]+$/.exec(audioName) || [""])[0],
+      bytes: audioBytes,
+    };
+    const list = Array.isArray(chart.notes) ? chart.notes : [];
+    const notes = [];
+    for (const item of list) {
+      const t = Array.isArray(item) ? item[0] : item && item.t;
+      const lane = Array.isArray(item) ? item[1] : item && item.lane;
+      if (!isFinite(+t) || +t < 0 || !Number.isInteger(+lane) || +lane < 0 || +lane >= LANES) continue;
+      notes.push({ id: notes.length + 1, t: round3(+t), lane: +lane, group: null });
+    }
+    state.meta = { ...state.meta, ...meta };
+    state.notes = notes;
+    state.sel = null;
+    state.linkPick = null;
+    hist.undo.length = 0;
+    hist.redo.length = 0;
+    state.nextId = notes.length + 1;
+    state.nextGid = 1;
+    afterChange();
+    syncAudioUI();
+    renderSong();
+    updatePackPlan();
+    toast(`已打开 ${file.name} · ${notes.length} 个音符 · 音频 ${audioName}`);
+  } catch (err) {
+    console.warn("[studio] pack open failed", err);
+    toast(`打开失败：${err.message}`, "error", 6000);
+  } finally {
+    hideBusy();
+  }
+}
+
+/* ------------------------------------------------------------- pack dialog */
+let packBusy = false;
+function updatePackPlan() {
+  if (!audio.buffer) {
+    $("packAudioPlan").textContent = "载入音频后可打包";
+    $("packOutName").textContent = "—";
+    return;
+  }
+  const plan = typeof AudioEncoder === "function"
+    ? "Opus 96 kbps（.ogg）"
+    : audio.raw ? `原始文件（${audio.raw.ext || "audio"}）` : "WAV 44.1 kHz";
+  $("packAudioPlan").textContent = plan;
+  $("packOutName").textContent = `${packId()}.tmbp · ${state.notes.length} 音符`;
+}
+function setPackProgress(frac, text) {
+  const box = $("packProgress");
+  if (frac != null) {
+    box.hidden = false;
+    $("packProgressBar").style.width = `${Math.round(clamp(frac, 0, 1) * 100)}%`;
+  }
+  if (text) setMetaMsg(text);
+}
+async function buildPack() {
+  if (packBusy) return;
+  if (!audio.buffer) { setMetaMsg("先载入音频", "error"); toast("先载入音频"); return; }
+  if (!String(state.meta.id || "").trim()) {
+    setMetaMsg("请先填写曲目 ID", "error");
+    toast("先填写曲目 ID", "error");
+    $("metaId").focus();
+    return;
+  }
+  packBusy = true;
+  $("btnBuildPack").disabled = true;
+  setPackProgress(0, "编码音频…");
+  try {
+    const res = await buildPackBytes((frac) => setPackProgress(frac));
+    const name = `${res.manifest.id}.tmbp`;
+    downloadBytes(res.bytes, name, "application/zip");
+    const mb = (res.bytes.length / 1e6).toFixed(2);
+    const msg = `✓ ${name} · ${mb} MB · ${res.codec}`;
+    setPackProgress(1, msg);
+    toast(`已打包 ${name}（${mb} MB，${res.codec}）`);
+  } catch (err) {
+    console.warn("[studio] pack failed", err);
+    setPackProgress(null, `打包失败：${err.message}`);
+    toast(`打包失败：${err.message}`, "error", 6000);
+  } finally {
+    packBusy = false;
+    $("btnBuildPack").disabled = false;
+  }
+}
+
 /* ================================================================== 对话窗 */
 function renderMetaSummary() {
   const id = $("metaId").value.trim() || state.meta.id || "my_song";
@@ -2905,7 +3742,8 @@ function renderMetaSummary() {
   const tail = state.notes.length ? fmtFrac(last, 1) : "—";
   $("metaSummary").innerHTML =
     `<b>${state.notes.length}</b> 个音符 · 时长 <b>${fmtClock(duration())}</b> · 尾音 <b>${tail}</b><br>` +
-    `导出后放进 <code>packs/${esc(id)}/</code>，目录里应有 <code>chart.json</code> 与 <code>manifest.json</code>。`;
+    `会打包成 <code>${esc(id)}.tmbp</code>（manifest + chart + 音频），放进 <code>external_songs/</code> 即可。`;
+  updatePackPlan();
 }
 function openMeta() {
   $("metaId").value = state.meta.id || "";
@@ -2915,6 +3753,8 @@ function openMeta() {
   $("metaDifficulty").value = state.meta.difficulty || "Normal";
   $("metaLead").value = state.meta.leadIn != null ? state.meta.leadIn : 2;
   setMetaMsg("导出不会关闭这个窗口");
+  setPackProgress(0);
+  $("packProgress").hidden = true;
   renderMetaSummary();
   if (!$("metaDlg").open) $("metaDlg").showModal();
   if (!state.meta.id) setTimeout(() => $("metaId").focus(), 30);
@@ -3019,10 +3859,51 @@ function bindEvents() {
     const v = e.target.value;
     state.snap = v !== "off";
     state.snapDiv = v === "off" ? state.snapDiv : +v;
-    if (state.snap && !(state.bpm > 0)) toast("吸附按 BPM 计算，先填一下 BPM");
+    if (state.snap) autoPhase();
+    else setPhase(0);
+    syncGridUI();
     saveSettings();
     needsDraw = true;
     e.target.blur();
+  });
+  $("phaseMs").addEventListener("change", (e) => {
+    const v = parseFloat(e.target.value);
+    if (isFinite(v)) setPhase(v / 1000);
+    else syncGridUI();
+    saveSettings();
+  });
+  $("phaseMs").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") e.target.blur();
+  });
+  $("phaseRange").addEventListener("input", (e) => setPhase(parseFloat(e.target.value) / 1000));
+  $("phaseRange").addEventListener("change", saveSettings);
+  $("btnAutoPhase").addEventListener("click", () => {
+    autoPhase();
+    saveSettings();
+    toast(`相位对齐：${(state.phase * 1000).toFixed(1)} ms`);
+  });
+  $("btnPhaseZero").addEventListener("click", () => {
+    setPhase(0);
+    saveSettings();
+  });
+  $("offsetMs").addEventListener("change", (e) => {
+    const v = parseFloat(e.target.value);
+    if (isFinite(v)) setOffset(v);
+    else syncGridUI();
+  });
+  $("offsetMs").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") e.target.blur();
+  });
+  $("offsetRange").addEventListener("input", (e) => setOffset(parseFloat(e.target.value)));
+  $("strength").addEventListener("input", (e) => setStrength(parseFloat(e.target.value)));
+  $("btnQuantize").addEventListener("click", applyQuantize);
+  $("btnShift").addEventListener("click", applyShift);
+  $("btnBuildPack").addEventListener("click", buildPack);
+  $("btnOpenPack").addEventListener("click", () => $("packFile").click());
+  $("packFile").addEventListener("change", (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (f) loadPackFile(f);
   });
   $("bpmInput").addEventListener("input", (e) => {
     const v = +e.target.value;
@@ -3124,7 +4005,9 @@ function bindEvents() {
     document.body.classList.remove("dragging");
     const f = e.dataTransfer.files && e.dataTransfer.files[0];
     if (!f) return;
-    if (/\.json$/i.test(f.name)) {
+    if (/\.tmbp$/i.test(f.name)) {
+      loadPackFile(f);
+    } else if (/\.json$/i.test(f.name)) {
       if (!audio.buffer) { toast("先载入音频，再导入谱面", "error"); return; }
       importChartFile(f);
     } else {
@@ -3264,6 +4147,11 @@ function initialize() {
     "metaZh", "metaEn", "metaArtist", "metaDifficulty", "metaLead", "metaSummary", "metaMsg", "helpDlg",
     "calibDlg", "calibCount", "calibDots", "calibResult", "calibInfo", "calibStart",
     "calibApply", "calibReset", "toast",
+    "phaseMs", "phaseRange", "btnAutoPhase", "btnPhaseZero", "btnQuantize",
+    "offsetMs", "offsetRange", "strength", "strengthVal", "btnShift",
+    "statCurrent", "statPreview", "statBands", "statMerge", "quantHint", "dirtyChip",
+    "gridHint", "btnBuildPack", "btnOpenPack", "packFile", "packAudioPlan",
+    "packOutName", "packProgress", "packProgressBar",
   ];
   const missing = required.filter((id) => !$(id));
   if (missing.length) throw new Error(`HTML 缺少元素：#${missing.join(", #")}`);
@@ -3298,6 +4186,23 @@ function initialize() {
     selectNote,
     setMode,
     layout,
+    // alignment
+    gridSnap,
+    targetFor,
+    autoPhase,
+    setPhase,
+    setOffset,
+    setStrength,
+    applyQuantize,
+    applyShift,
+    updateAlignStats,
+    // packing
+    packId,
+    packChart,
+    buildPackBytes,
+    downloadBytes,
+    readZip,
+    loadPackFile,
     noteScreen(id) {
       const n = byId(id);
       if (!n) return null;
