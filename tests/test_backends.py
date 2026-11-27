@@ -1,11 +1,18 @@
 """Output backends: pipe writing, PulseAudio latency choices, pacing contract."""
 from __future__ import annotations
 
+import os
 import unittest
 from types import SimpleNamespace
 from unittest import mock
 
 from tmb.audio import backends
+
+# open_backend() has a platform-specific default: POSIX probes the mixers,
+# Windows always lands on winmm.  Both branches stay covered instead of letting
+# the POSIX-only assertions fail on Windows.
+POSIX_ONLY = unittest.skipIf(os.name == "nt", "POSIX mixer selection only")
+WINDOWS_ONLY = unittest.skipIf(os.name != "nt", "Windows winmm selection only")
 
 
 class _ChunkedPipe:
@@ -83,12 +90,15 @@ class BackendSelection(unittest.TestCase):
              mock.patch("tmb.audio.backends._pulse_available", return_value=pulse_up):
             return backends.open_backend(prefer=prefer)
 
+    @POSIX_ONLY
     def test_live_pulse_server_wins_over_raw_alsa(self):
         self.assertEqual(self._pick({"aplay", "paplay", "pactl"}, True).name, "pulse")
 
+    @POSIX_ONLY
     def test_dead_pulse_server_falls_back_to_alsa(self):
         self.assertEqual(self._pick({"aplay", "paplay", "pactl"}, False).name, "alsa")
 
+    @POSIX_ONLY
     def test_dead_pulse_without_aplay_warns_instead_of_faking_sound(self):
         with mock.patch("tmb.audio.backends.shutil.which",
                         side_effect=lambda n: "/usr/bin/paplay" if n == "paplay" else None), \
@@ -118,6 +128,32 @@ class BackendSelection(unittest.TestCase):
     def test_pulse_probe_is_false_without_pactl(self):
         with mock.patch("tmb.audio.backends.shutil.which", return_value=None):
             self.assertFalse(backends._pulse_available())
+
+
+class WinBackendSelection(unittest.TestCase):
+    """Windows has one automatic choice - winmm - regardless of POSIX tools."""
+
+    @WINDOWS_ONLY
+    def test_auto_pick_is_winmm_and_ignores_posix_tools(self):
+        with mock.patch("tmb.audio.backends.shutil.which",
+                        return_value="/usr/bin/paplay"), \
+             mock.patch("tmb.audio.backends._pulse_available", return_value=True), \
+             mock.patch("tmb.audio.backends.WinmmBackend") as winmm:
+            self.assertIs(backends.open_backend(), winmm.return_value)
+
+    @WINDOWS_ONLY
+    def test_explicit_winmm_is_honoured(self):
+        with mock.patch("tmb.audio.backends.WinmmBackend") as winmm:
+            self.assertIs(backends.open_backend(prefer="winmm"), winmm.return_value)
+
+    @WINDOWS_ONLY
+    def test_winmm_failure_warns_and_runs_silent(self):
+        with mock.patch("tmb.audio.backends.WinmmBackend",
+                        side_effect=OSError("waveOutOpen failed: 32")), \
+             mock.patch("tmb.audio.backends._warn_silent") as warn:
+            backend = backends.open_backend()
+        self.assertEqual(backend.name, "null")
+        self.assertIn("winmm unavailable", warn.call_args[0][0])
 
 
 if __name__ == "__main__":
