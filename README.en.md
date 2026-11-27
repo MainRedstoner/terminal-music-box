@@ -101,7 +101,11 @@ accompaniment: they still light up and keep the music going, but make no sound.
 **2 seconds** without a play key pauses it; the next key press resumes it. The
 **Song button** shows only while prenatal mode is on, and `^A` responds only
 then. The choice is limited to the rhythm game's four songs (defaults to
-Canon in C). Songs loop. The melody follows the audio output clock, so its
+Canon in C). Timbres are locked per song exactly as in the rhythm game — the
+didgeridoo for Canon, the electric piano for the other three — so long notes
+sound exactly as they do there; `^X` still overrides one temporarily, and the
+volume/length strip follows the timbre that is actually sounding. Songs loop.
+The melody follows the audio output clock, so its
 notes land on exact samples regardless of frame rate or a stalled frame.
 
 Canon, Minuet in G, Turkish March and Für Elise sound pitches outside the

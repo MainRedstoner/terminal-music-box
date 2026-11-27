@@ -241,6 +241,26 @@ class FreePlay(HeadlessCase):
         self.assertIs(self.screen.player, p)
         self.assertEqual(p.timbre, self.cfg.timbre)
 
+    def test_prenatal_plays_the_song_locked_timbre(self):
+        # Same score, same locked timbre as the rhythm game: Canon keeps its
+        # didgeridoo even though free play is set to the harp. The header must
+        # name the timbre that is actually sounding.
+        self.cfg.timbre = "harp"
+        self.cfg.prenatal_song = "canon"
+        self.press("ctrl+t")
+        self.assertEqual(self.screen.player.timbre, "didgeridoo")
+        self.assertIn(synth.timbre_name("didgeridoo", "zh"), self.frame)
+        self.assertNotIn(synth.timbre_name("harp", "zh"), self.frame)
+
+    def test_prenatal_song_change_follows_the_new_locked_timbre(self):
+        self.press("ctrl+t")
+        self.assertEqual(self.screen.player.timbre, "didgeridoo")
+        self.press("ctrl+a")
+        self.press("down")  # canon -> minuet_g
+        self.press("enter")
+        self.assertEqual(self.screen.player.song.id, "minuet_g")
+        self.assertEqual(self.screen.player.timbre, "pling")
+
     def test_prenatal_pauses_after_the_activity_window(self):
         self.press("ctrl+t")
         p = self.screen.player
@@ -462,7 +482,9 @@ class PrenatalPreload(HeadlessCase):
         self.assertTrue(self.screen._waiting)
         self.assertFalse(p.playing)
         tid, midis = self.requested()
-        self.assertEqual(tid, self.cfg.timbre)
+        # Prenatal auto-play carries the song's locked timbre, exactly like
+        # the rhythm game, so the same score sounds the same on both screens.
+        self.assertEqual(tid, songs.SONGS["fur_elise"].timbre)
         self.assertLessEqual(set(songs.SONGS["fur_elise"].pitches), set(midis))
 
     def test_playback_starts_at_the_top_once_the_buffers_land(self):
@@ -486,7 +508,7 @@ class PrenatalPreload(HeadlessCase):
                 self.cfg.prenatal_song = sid
                 self.press("ctrl+t")
                 tid, midis = self.requested()
-                self.assertEqual(tid, self.cfg.timbre)
+                self.assertEqual(tid, songs.SONGS[sid].timbre)
                 self.assertEqual(self.screen.player.song.id, sid)
                 # The song's complete score, not just the 21 keyboard keys.
                 self.assertLessEqual(set(songs.SONGS[sid].pitches), set(midis))
@@ -499,7 +521,7 @@ class PrenatalPreload(HeadlessCase):
         p = self.screen.player
         self.assertEqual(p.song.id, songs.RHYTHM_ORDER[0])
         tid, midis = self.requested()
-        self.assertEqual(tid, self.cfg.timbre)
+        self.assertEqual(tid, songs.SONGS[songs.RHYTHM_ORDER[0]].timbre)
         self.assertLessEqual(set(p.song.pitches), set(midis))
 
     def test_switching_timbre_mid_song_reloads_and_resumes_in_place(self):
@@ -545,7 +567,7 @@ class PrenatalPreload(HeadlessCase):
         self.assertTrue(self.screen._waiting)
         self.assertFalse(p.playing)
         tid, midis = self.requested()
-        self.assertEqual(tid, self.cfg.timbre)
+        self.assertEqual(tid, songs.SONGS[songs.RHYTHM_ORDER[0]].timbre)
         self.assertLessEqual(set(p.song.pitches), set(midis))
 
     def test_song_loop_regates_a_cold_cache(self):
