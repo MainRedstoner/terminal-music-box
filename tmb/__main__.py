@@ -44,7 +44,7 @@ def demo() -> None:
             app.step(0.016)
 
     frame("menu / unicode")
-    t.key("4")
+    t.key("3")  # toggle mode; "4" is the quit shortcut
     frame("menu / ascii")
     t.key("1")
     frame("freeplay / ascii")
@@ -53,7 +53,12 @@ def demo() -> None:
     t.key("d")
     frame("freeplay / notes")
     t.key("ctrl+x")
-    frame("freeplay / next timbre")
+    frame("freeplay / timbre picker")
+    t.key("/")
+    t.key("b")
+    frame("freeplay / timbre search")
+    t.key("enter")
+    frame("freeplay / timbre picked")
     t.key("ctrl+t")
     frame("freeplay / prenatal on")
     advance(1.0)
@@ -63,7 +68,7 @@ def demo() -> None:
     frame("freeplay / prenatal paused (no key for 2s)")
     t.key("esc")
     frame("back to menu")
-    t.key("4")
+    t.key("3")  # toggle back to Unicode
     frame("menu / unicode again")
     t.key("1")
     frame("freeplay / unicode")

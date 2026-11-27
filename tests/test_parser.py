@@ -73,6 +73,10 @@ class ParserKeys(unittest.TestCase):
     def test_alt_letter_is_normalized(self):
         self.assertEqual(keys(self.p.feed(b"\x1ba")), ["a"])
 
+    def test_multibyte_utf8_text_arrives_whole(self):
+        # The legacy (non-kitty) path feeds UTF-8 text, e.g. a search query.
+        self.assertEqual(keys(self.p.feed("卡农".encode("utf-8"))), ["卡", "农"])
+
     def test_legacy_sequences_never_emit_releases(self):
         ev = self.p.feed(b"a\x1b[A\r\x1b[<0;1;1M")
         self.assertTrue(all(e.pressed for e in ev if isinstance(e, KeyEvent)))
@@ -112,6 +116,15 @@ class KittyProtocol(unittest.TestCase):
     def test_digits_and_punctuation_pass_through(self):
         self.assertEqual(keys(self.p.feed(b"\x1b[49u\x1b[33u\x1b[45u")),
                          ["1", "!", "-"])
+
+    def test_slash_and_multibyte_text_pass_through(self):
+        # '/' opens list search; typed CJK arrives as its own codepoint.
+        self.assertEqual(keys(self.p.feed(b"\x1b[47u")), ["/"])
+        self.assertEqual(keys(self.p.feed(b"\x1b[21345u")), ["卡"])
+        self.assertEqual(keys(self.p.feed(b"\x1b[20892u")), ["农"])
+
+    def test_functional_private_use_block_is_dropped(self):
+        self.assertEqual(self.p.feed(b"\x1b[57428u"), [])
 
     def test_arrow_and_tilde_releases(self):
         self.assertEqual(self.p.feed(b"\x1b[1;1:3A"), [KeyEvent("up", pressed=False)])
