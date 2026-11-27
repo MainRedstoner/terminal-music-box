@@ -55,11 +55,13 @@ class FreePlay(HeadlessCase):
         self.assertEqual(self.screen.key_down, {})
         self.assertEqual(self.engine.active(), 21)
 
-    def test_key_up_does_not_stop_a_playing_note(self):
+    def test_key_up_leaves_the_note_fading(self):
         self.press("a")
+        voice = next(iter(self.engine._voices.values()))
         self.release("a")
         self.assertEqual(self.screen.key_down, {})
-        self.assertEqual(self.engine.active(), 1)
+        self.assertEqual(self.engine.active(), 1)  # fading out, not cut dead
+        self.assertGreater(voice._fade_left, 0)
 
     def test_sustained_timbre_holds_a_voice_until_key_release(self):
         self.cfg.timbre = "bit"
@@ -117,6 +119,17 @@ class FreePlay(HeadlessCase):
         self.step()
         self.assertEqual(self.engine.active(), 1)
         self.assertTrue(self.screen.key_down.get("a"))
+
+    def test_ringing_timbre_holds_until_key_release(self):
+        self.press("a")
+        voice = next(iter(self.engine._voices.values()))
+        self.assertFalse(voice._sustain)
+        self.assertIn("a", self.screen.key_voice)
+        self.advance(1.0)
+        self.assertEqual(self.engine.active(), 1)  # still sounding while held
+        self.release("a")
+        self.assertNotIn("a", self.screen.key_voice)
+        self.assertGreater(voice._fade_left, 0)  # fast release, not a hard cut
 
     def test_legacy_sustained_timbre_plays_a_fixed_length_one_shot(self):
         self.term.release_events = False

@@ -70,13 +70,14 @@ class VoiceBookkeeping(unittest.TestCase):
         self.assertTrue(v.done)
         self.assertLessEqual(chunks * 256, rel_len + 256)
 
-    def test_note_off_on_one_shot_is_a_noop(self):
+    def test_note_off_on_a_played_one_shot_schedules_a_release(self):
         vid = self.eng.play_note("harp", 60, 0.5)
         v = self.eng._voices[vid]
         before = list(v._segments)
         self.eng.note_off(vid)
-        self.assertEqual(v._segments, before)
-        self.assertFalse(v.done)
+        self.assertEqual(v._segments, before)  # buffer untouched
+        self.assertFalse(v.done)               # fades on the mixer, not instantly
+        self.assertGreater(v._fade_left, 0)
 
     def test_note_off_unknown_id_is_safe(self):
         self.eng.note_off(9999)
@@ -91,12 +92,22 @@ class VoiceBookkeeping(unittest.TestCase):
         vid = self.eng.play_note("harp", 60, 1.0)
         self.assertEqual(len(self.eng._voices[vid]._segments[0][0]), len(natural))
 
-    def test_play_note_length_trims_and_fades_to_silence(self):
+    def test_play_note_length_shortens_by_decay_not_truncation(self):
         natural = self.eng._buffers("harp", 60).oneshot
         vid = self.eng.play_note("harp", 60, 1.0, length=0.5)
-        buf = self.eng._voices[vid]._segments[0][0]
-        self.assertEqual(len(buf), int(len(natural) * 0.5))
-        self.assertEqual(buf[-1], 0.0)
+        v = self.eng._voices[vid]
+        self.assertIs(v._segments[0][0], natural)  # shared buffer, not a slice
+        self.assertLess(v._decay, 1.0)
+        v.pull(int(len(natural) * 0.5))
+        self.assertTrue(v.done)  # -60 dB by the shortened length
+
+    def test_note_off_ringing_timbre_gets_a_fast_release(self):
+        vid = self.eng.note_on("harp", 60)
+        v = self.eng._voices[vid]
+        self.assertFalse(v._sustain)
+        self.eng.note_off(vid)
+        self.assertGreater(v._fade_left, 0)
+        self.assertLessEqual(v._fade_total, int(synth.SR * 0.1))
 
     def test_play_note_length_extends_sustained_assembly(self):
         vid = self.eng.play_note("flute", 60, 0.5, length=4.0)

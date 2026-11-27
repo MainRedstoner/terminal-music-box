@@ -61,7 +61,8 @@ def _get_pool():
 class Voice:
     def __init__(self, segments: List[Segment], release: Optional[array] = None,
                  sustain: bool = False, gain: float = 1.0,
-                 steady: Optional[array] = None, start: int = 0):
+                 steady: Optional[array] = None, start: int = 0,
+                 decay: float = 1.0):
         self._segments = segments
         self._idx = 0
         self._pos = start
@@ -76,6 +77,10 @@ class Voice:
         self.done = False
         self._fade_total = 0
         self._fade_left = 0
+        # Extra per-sample gain multiplier (<1) that shortens a ringing
+        # note by speeding up its decay instead of slicing its buffer.
+        self._decay = decay
+        self._decay_g = 1.0
 
     def fade_out(self, samples: int) -> None:
         """Mark the voice to ramp to silence over `samples` frames."""
@@ -89,6 +94,9 @@ class Voice:
 
     def release(self) -> None:
         if not self._sustain:
+            # A held ringing note has no loop to fall back on; on key-up it
+            # must die quickly instead of ringing its long natural tail.
+            self.fade_out(max(1, int(SR * 0.09)))
             return
         seg = self._steady
         if seg is not None and len(seg):
@@ -146,6 +154,17 @@ class Voice:
         self.consumed += filled
         if self._idx >= len(self._segments):
             self.done = True
+        if self._decay < 1.0:
+            # Shortened ringing note: fade the whole voice exponentially.
+            # Cheaper than rewriting the shared buffer and keeps the pitch.
+            g = self._decay_g
+            d = self._decay
+            for i in range(n):
+                out[i] *= g
+                g *= d
+            self._decay_g = g
+            if g < 1e-3:  # -60 dB: inaudible, free the voice early
+                self.done = True
         if self._fade_left > 0:
             played = self._fade_total - self._fade_left
             take = min(n, self._fade_left)
@@ -466,21 +485,26 @@ class AudioEngine:
         """Play a fixed-length note.
 
         `length` is the user's per-timbre note-length multiplier (None/1.0 =
-        the natural buffer from commit 4426253). Values below 1 trim the
-        buffer with a fade; values above 1 only extend timbres that can be
-        assembled (sustained ones) — ringing timbres simply end naturally.
+        the natural buffer). Values below 1 make ringing timbres decay faster
+        — the shared buffer is played through an extra exponential gain curve,
+        so the note keeps its pitch instead of being sliced; sustained timbres
+        are assembled at the shorter duration. Values above 1 only extend
+        sustained timbres: ringing ones cannot outlast their natural buffer.
         """
         nb = self._buffers(tid, midi)
         t = get_timbre(tid)
         mult = 1.0 if length is None else max(0.12, float(length))
+        decay = 1.0
         if t.sustain and nb.steady is not None:
             buf = assemble_oneshot(nb, max(0.12, dur * mult))
         else:
             buf = nb.oneshot if nb.oneshot is not None else assemble_oneshot(nb, dur)
             if mult < 1.0:
-                want = max(int(SR * 0.12), int(len(buf) * mult))
-                buf = fade_out(buf[:want], 60)
-        return self._add(Voice([(buf, False)], gain=vel))
+                # Hit -60 dB at len*mult: the note sounds shorter, but its
+                # tail glides down instead of being cut mid-ring.
+                target = max(int(SR * 0.12), int(len(buf) * mult))
+                decay = math.exp(-7.0 / target)
+        return self._add(Voice([(buf, False)], gain=vel, decay=decay))
 
     def _add(self, v: Voice) -> int:
         with self._lock:
