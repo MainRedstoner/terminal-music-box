@@ -83,6 +83,31 @@ def draw_menu_row(screen: Screen, x: int, y: int, w: int, label: str, selected: 
         hits.add(x, y, w, 1, action)
 
 
+def matches(query: str, aliases) -> bool:
+    """Case-insensitive substring match over one entry's alias strings.
+
+    Searchable lists pass every name an entry is findable by (both languages,
+    ids…), so a query finds items regardless of the active UI language.
+    """
+    q = query.casefold()
+    return any(q in str(a).casefold() for a in aliases if a)
+
+
+def draw_search_field(screen: Screen, x: int, y: int, w: int, query: str,
+                      theme: Theme) -> int:
+    """The '/query▌' input line of a searchable list; returns its width.
+
+    Overlong queries drop characters from the left so the caret stays visible.
+    """
+    cursor = "▌" if theme.is_unicode else "_"
+    line = "/" + query + cursor
+    while text_width(line) > max(1, w) and len(query) > 1:
+        query = query[1:]
+        line = "/" + query + cursor
+    screen.text(x, y, line, C.white, None, True)
+    return text_width(line)
+
+
 def center_text(screen: Screen, y: int, text: str, fg=None, bg=None, bold=False) -> None:
     tw = text_width(text)
     x = max(0, (screen.w - tw) // 2)

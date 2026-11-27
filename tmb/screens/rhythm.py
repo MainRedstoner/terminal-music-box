@@ -4,9 +4,10 @@ from __future__ import annotations
 from statistics import median
 
 from ..ansi import Screen as Buffer, C, text_width
-from ..events import (KeyEvent, ENTER, SPACE, TAB, is_exit,
+from ..events import (KeyEvent, ENTER, SPACE, TAB, BACKSPACE, is_exit,
                       UP, DOWN, LEFT, RIGHT)
-from ..ui import center_text, draw_box, draw_button, draw_menu_row
+from ..ui import (center_text, draw_box, draw_button, draw_menu_row,
+                  draw_search_field, matches)
 from .base import Screen
 from .. import songs
 
@@ -17,7 +18,8 @@ class RhythmMenuScreen(Screen):
     The song list is grouped under 内置音乐 / 外部音乐 headers; the external
     packs below are .tmbp files (chart + audio) from external_songs/ and are
     gated on their audio being decoded, like built-in songs gate on buffer
-    pre-rendering.
+    pre-rendering. '/' opens a live search over both groups; a group's header
+    stays visible as long as any song under it matches.
     """
 
     def enter(self, **kw):
@@ -28,22 +30,55 @@ class RhythmMenuScreen(Screen):
         self._pending_song = None
         self._pending_pack = None
         self.notice = ""
+        self.searching = False
+        self.query = ""
         self.app.external.refresh()
         self._rebuild()
 
     def _rebuild(self) -> None:
         ext = self.app.external
-        rows: list = [("header", "rhythm.builtin")]
-        rows += [("song", sid, None) for sid in songs.RHYTHM_ORDER]
-        rows.append(("header", "rhythm.external"))
+        self.all_rows: list = [("header", "rhythm.builtin")]
+        self.all_rows += [("song", sid, None) for sid in songs.RHYTHM_ORDER]
+        self.all_rows.append(("header", "rhythm.external"))
         if ext.packs:
-            rows += [("song", pack.id, pack) for pack in ext.packs]
+            self.all_rows += [("song", pack.id, pack) for pack in ext.packs]
         else:
-            rows.append(("hint", "rhythm.external_empty"))
+            self.all_rows.append(("hint", "rhythm.external_empty"))
+        self._apply_query()
+
+    def _song_aliases(self, row) -> list:
+        sid, pack = row[1], row[2]
+        if pack is not None:
+            return [pack.title_zh, pack.title_en, pack.artist, pack.id]
+        song = songs.SONGS[sid]
+        return [song.title_zh, song.title_en, sid]
+
+    def _apply_query(self) -> None:
+        """Recompute the visible rows from the query, keeping group headers.
+
+        While filtering, a group's header only appears when at least one song
+        under it matches, and the empty-external hint is dropped.
+        """
+        q = self.query.casefold()
+        rows: list = []
+        if q:
+            header = None
+            header_shown = False
+            for r in self.all_rows:
+                if r[0] == "header":
+                    header, header_shown = r, False
+                elif r[0] == "song" and matches(q, self._song_aliases(r)):
+                    if header is not None and not header_shown:
+                        rows.append(header)
+                        header_shown = True
+                    rows.append(r)
+        else:
+            rows = self.all_rows
         self.rows = rows
         self.song_rows = [i for i, r in enumerate(rows) if r[0] == "song"]
         self.song_ids = [rows[i][1] for i in self.song_rows]
         self.row_of_song = {row: idx for idx, row in enumerate(self.song_rows)}
+        self.song_total = sum(1 for r in self.all_rows if r[0] == "song")
         self.song_index = min(self.song_index, max(0, len(self.song_rows) - 1))
         self.row_scroll = 0
 
@@ -155,7 +190,36 @@ class RhythmMenuScreen(Screen):
         if not ev.pressed:
             return
         k = ev.key
-        if is_exit(k):
+        if self.searching:
+            if is_exit(k):
+                # Esc cancels the search itself; a second Esc leaves the menu.
+                self.searching = False
+                self.query = ""
+                self._apply_query()
+                return
+            if k == BACKSPACE:
+                self.query = self.query[:-1]
+                self._apply_query()
+                return
+            if k == SPACE:
+                self.query += " "
+                self._apply_query()
+                return
+            if len(k) == 1:
+                self.query += k
+                self._apply_query()
+                return
+            if k == UP:
+                self._move(-1)
+            elif k == DOWN:
+                self._move(1)
+            elif k == ENTER:
+                self._activate()
+            return
+        if k == "/":
+            self.focus = 0  # search always targets the song list
+            self.searching = True
+        elif is_exit(k):
             self.app.navigate("menu")
         elif k in (LEFT, RIGHT, TAB):
             self.focus = 1 - self.focus
@@ -207,16 +271,25 @@ class RhythmMenuScreen(Screen):
                  title_fg=C.yellow if not song_active else C.gray)
 
         lang = th.lang
+        list_rows = rows
+        list_y = top + 1
+        if self.searching:
+            fw = draw_search_field(scr, x + 1, list_y, song_w - 2, self.query, th)
+            if len(self.song_rows) != self.song_total and fw + 7 <= song_w - 2:
+                scr.text(x + 1 + fw + 1, list_y,
+                         "%d/%d" % (len(self.song_rows), self.song_total), C.dim)
+            list_y += 1
+            list_rows = max(0, rows - 1)
         sel_row = self.song_rows[self.song_index] if self.song_rows else 0
         if sel_row < self.row_scroll:
             self.row_scroll = sel_row
-        if rows and sel_row >= self.row_scroll + rows:
-            self.row_scroll = sel_row - rows + 1
-        for r in range(rows):
+        if list_rows and sel_row >= self.row_scroll + list_rows:
+            self.row_scroll = sel_row - list_rows + 1
+        for r in range(list_rows):
             i = self.row_scroll + r
             if i >= len(self.rows):
                 break
-            y = top + 1 + r
+            y = list_y + r
             row = self.rows[i]
             if row[0] == "header":
                 self._draw_header(scr, x + 1, y, song_w - 2, row[1], th)
@@ -231,6 +304,8 @@ class RhythmMenuScreen(Screen):
                     fg=C.white if song_active else C.gray, hits=self.hits,
                     action=(lambda k=idx: self._start_song(k)),
                 )
+        if self.searching and not self.song_rows:
+            scr.text(x + 3, list_y, th.t("search.no_match"), C.dim)
 
         labels = [th.t("rhythm.calibration"), th.t("rhythm.keys")]
         for i, label in enumerate(labels[:rows]):

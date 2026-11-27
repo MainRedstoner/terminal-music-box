@@ -1,4 +1,4 @@
-"""Free play: 21-key C-major keyboard, timbre cycling, prenatal mode."""
+"""Free play: 21-key C-major keyboard, timbre picker, prenatal mode."""
 from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
@@ -60,6 +60,7 @@ class FreePlayScreen(Screen):
         super().__init__(app)
         self.player: Optional[songs.SongPlayer] = None
         self._picking = False
+        self._resuming = False
         self._reset()
 
     def _reset(self) -> None:
@@ -81,7 +82,11 @@ class FreePlayScreen(Screen):
         self._silent = False
 
     def enter(self, **kw) -> None:
-        if self.player is not None:
+        # Coming back from the song/timbre picker keeps the session exactly
+        # as it was — player, prenatal flag, sound-strip focus (a player-less
+        # re-entry must not fall through into a full _reset).
+        if self.player is not None or self._resuming:
+            self._resuming = False
             self.last_activity = self.clock
             return
         self._reset()
@@ -91,7 +96,9 @@ class FreePlayScreen(Screen):
         self._picking = False
         self._clear_keys()
         if picking:
+            self._resuming = True
             return
+        self._resuming = False
         if self.player is not None:
             self.player.stop()
             self.player = None
@@ -110,7 +117,7 @@ class FreePlayScreen(Screen):
         if is_exit(k):
             self._back()
         elif k == "ctrl+x":
-            self._cycle_timbre()
+            self._open_timbre()
         elif k == "ctrl+t":
             self._toggle_prenatal()
         elif k == "ctrl+a" and self.player is not None:
@@ -189,8 +196,12 @@ class FreePlayScreen(Screen):
 
     # Actions -----------------------------------------------------------------
 
-    def _cycle_timbre(self) -> None:
-        tid = synth.next_timbre(self.config.timbre)
+    def _open_timbre(self) -> None:
+        self._picking = True
+        self.app.navigate("timbre_select", on_select=self._apply_timbre,
+                          back="freeplay", selected=self.config.timbre)
+
+    def _apply_timbre(self, tid: str) -> None:
         self.config.timbre = tid
         self.config.save()
         self._clear_keys()
@@ -456,7 +467,7 @@ class FreePlayScreen(Screen):
         on = self.player is not None
         state = th.t("common.on") if on else th.t("common.off")
         btns = [
-            (th.t("freeplay.btn_timbre"), self._cycle_timbre, False),
+            (th.t("freeplay.btn_timbre"), self._open_timbre, False),
             (th.t("freeplay.btn_prenatal", state=state), self._toggle_prenatal, on),
         ]
         if on:  # song picking only makes sense while prenatal mode is running

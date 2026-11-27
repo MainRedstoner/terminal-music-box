@@ -212,7 +212,10 @@ class _Parser:
             return None
         if key_num in _KITTY_KEYS:
             key = _KITTY_KEYS[key_num]
-        elif 33 <= key_num < 127:
+        elif 33 <= key_num < 57344:
+            # Printable Unicode below kitty's private-use functional-key
+            # block: typed non-ASCII text (e.g. a CJK search query) arrives
+            # as its own codepoint, not just ASCII letters.
             key = _norm_printable(chr(key_num))
         else:
             return None

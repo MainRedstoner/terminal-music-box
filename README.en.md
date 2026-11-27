@@ -22,7 +22,8 @@ Implements [issue #1 — software development plan](https://github.com/MainRedst
 - **Rhythm Game** — vertically falling notes, a judgment line,
   Perfect / Good / Miss judgment with effects, live score & combo, latency
   calibration, and rebindable keys. The song list is grouped into
-  **Built-in Music / External Music**; external packs (chart + audio bundled
+  **Built-in Music / External Music** with a live `/` search (Chinese or
+  English); external packs (chart + audio bundled
   into one `.tmbp` file) dropped into `external_songs/` show up and play.
 - **Audio** — a real-time polyphonic mixer streaming to ALSA (`aplay`) or
   PulseAudio/PipeWire (`pacat`/`paplay`) on Linux, `winmm` on Windows, and WAV/null
@@ -69,8 +70,10 @@ A S D F G H J   — mid   (C4..B4)
 Z X C V B N M   — low   (C3..B3)
 ```
 
-- `^X` — cycle timbre (harp, bass, flute, bell, guitar, chime, xylophone,
-  iron xylophone, cow bell, didgeridoo, bit, banjo, pling).
+- `^X` — open the timbre list and pick (harp, bass, flute, bell, guitar, chime,
+  xylophone, iron xylophone, cow bell, didgeridoo, bit, banjo, pling). Inside
+  the list, `/` opens a live filter matching Chinese names, English names and
+  timbre ids alike.
 - **Key hold**: on Kitty-protocol terminals (or Windows terminals), sustained
   timbres (flute, bit, didgeridoo) hold until key-up. Harp, bell and chime
   decay at the current length setting while held and speed up to their own
@@ -84,7 +87,8 @@ Z X C V B N M   — low   (C3..B3)
   up their decay rather than cutting the tail). Changes apply instantly; bit
   defaults to 0.25× length.
 - `^T` — toggle prenatal mode.
-- `^A` — choose the prenatal song (only responds while prenatal mode is on).
+- `^A` — choose the prenatal song (only responds while prenatal mode is on);
+  `/` inside the list searches by Chinese or English title.
 - `^Q`/`^D`/`^C`/`Esc` — back to menu.
 - The on-screen keys and buttons are mouse-clickable.
 
@@ -106,6 +110,10 @@ play key; later starts are immediate.
 ### Rhythm Game
 - The melody auto-plays for the whole run — each note sounds exactly as it
   crosses the judgment line. Your taps are silent judgment only.
+- Press `/` in the song list to search: built-in and external packs filter
+  live by Chinese title, English title or id, and a group header stays
+  visible while anything under it matches. `Esc` clears the search; a second
+  `Esc` returns to the main menu.
 - Canon's timbre is locked to the didgeridoo; Turkish March, Minuet in G, and
   Für Elise use the electric piano, regardless of the free-play timbre selection.
 - Turkish March is the complete rondo
@@ -273,7 +281,7 @@ tmb/
     synth.py       procedural Minecraft note-block timbres
   songs.py         melodies, beatmaps, pausable song player
   external.py      external song packs (.tmbp): parsing, ffmpeg decode, PCM player
-  screens/         main_menu, freeplay, rhythm, rhythm_game, song_select
+  screens/         main_menu, freeplay, rhythm, rhythm_game, song_select, timbre_select
 tools/
   make_pack.py     pack builder: ffmpeg-compress audio, assemble a .tmbp
   chart_canon_style.py  Canon-style auto charting (melody-band onsets + two-hand planning)
