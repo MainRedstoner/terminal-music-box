@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
 
-from ..ansi import Screen as Buffer, C, char_width, text_width
+from ..ansi import Screen as Buffer, C, text_width
 from ..config import LEN_RANGE, VOL_RANGE
 from ..events import KeyEvent, MouseEvent, is_exit, LEFT, RIGHT, UP, DOWN
-from ..ui import center_text, draw_box, draw_button
+from ..ui import center_text, draw_box, draw_button, fit_text
 from .. import songs
 from ..audio import synth
 from .base import Screen
@@ -39,20 +39,6 @@ LABEL_W = 6
 
 def note_name(midi: int) -> str:
     return "%s%d" % (NOTE_NAMES.get(midi % 12, "?"), midi // 12 - 1)
-
-
-def _fit(s: str, width: int) -> str:
-    if text_width(s) <= width:
-        return s
-    out: List[str] = []
-    used = 0
-    for ch in s:
-        cw = char_width(ch)
-        if used + cw > width:
-            break
-        out.append(ch)
-        used += cw
-    return "".join(out)
 
 
 class FreePlayScreen(Screen):
@@ -488,7 +474,7 @@ class FreePlayScreen(Screen):
             if x >= w:
                 break
             bw = min(bw, w - x)
-            draw_button(scr, x, y, bw, bh, _fit(lab, max(1, bw - 2)), th,
+            draw_button(scr, x, y, bw, bh, fit_text(lab, max(1, bw - 2)), th,
                         selected=sel, hits=self.hits, action=action)
             x += bw + gap
 

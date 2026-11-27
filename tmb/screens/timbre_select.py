@@ -14,14 +14,17 @@ class TimbreSelectScreen(ListScreen):
         self.back_target = back
         self.title = self.theme.t("timbre.select")
         lang = self.theme.lang
+        other = "en" if lang == "zh" else "zh"
         ids = list(synth.ORDER)
         items = [synth.timbre_name(t, lang) for t in ids]
+        # Search rows show the full name in both languages, matches highlighted.
+        sublabels = [synth.timbre_name(t, other) for t in ids]
         # Searchable in both languages whatever the UI language: every timbre
         # carries its Chinese and English name plus its id.
         keywords = [[tim.name_zh, tim.name_en, tim.id]
                     for tim in (synth.get_timbre(t) for t in ids)]
         actions = [(lambda tid=t: self._pick(tid)) for t in ids]
-        self.set_items(items, actions, keywords)
+        self.set_items(items, actions, keywords, sublabels)
         cur = selected if selected is not None else self.config.timbre
         if cur in ids:
             self.index = ids.index(cur)

@@ -14,8 +14,11 @@ class SongSelectScreen(ListScreen):
         self.back_target = back
         self.title = title or self.theme.t("song.select")
         lang = self.theme.lang
+        other = "en" if lang == "zh" else "zh"
         ids = list(songs.RHYTHM_ORDER)
         items = [songs.SONGS[s].title(lang) for s in ids]
+        # Search rows show the full name in both languages, matches highlighted.
+        sublabels = [songs.SONGS[s].title(other) for s in ids]
         # Searchable in both languages whatever the UI language: every song
         # carries its Chinese and English title plus its id.
         keywords = []
@@ -23,7 +26,7 @@ class SongSelectScreen(ListScreen):
             song = songs.SONGS[s]
             keywords.append([song.title_zh, song.title_en, s])
         actions = [(lambda sid=s: self._pick(sid)) for s in ids]
-        self.set_items(items, actions, keywords)
+        self.set_items(items, actions, keywords, sublabels)
         cur = selected if selected is not None else self.config.prenatal_song
         if cur in ids:
             self.index = ids.index(cur)

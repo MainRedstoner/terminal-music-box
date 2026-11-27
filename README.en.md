@@ -73,7 +73,8 @@ Z X C V B N M   — low   (C3..B3)
 - `^X` — open the timbre list and pick (harp, bass, flute, bell, guitar, chime,
   xylophone, iron xylophone, cow bell, didgeridoo, bit, banjo, pling). Inside
   the list, `/` opens a live filter matching Chinese names, English names and
-  timbre ids alike.
+  timbre ids alike; each search row shows the full name in both languages
+  with the matched characters highlighted in gold.
 - **Key hold**: on Kitty-protocol terminals (or Windows terminals), sustained
   timbres (flute, bit, didgeridoo) hold until key-up. Harp, bell and chime
   decay at the current length setting while held and speed up to their own
@@ -88,7 +89,8 @@ Z X C V B N M   — low   (C3..B3)
   defaults to 0.25× length.
 - `^T` — toggle prenatal mode.
 - `^A` — choose the prenatal song (only responds while prenatal mode is on);
-  `/` inside the list searches by Chinese or English title.
+  `/` inside the list searches by Chinese or English title, with both names
+  shown and the matched characters highlighted.
 - `^Q`/`^D`/`^C`/`Esc` — back to menu.
 - The on-screen keys and buttons are mouse-clickable.
 
@@ -111,7 +113,8 @@ play key; later starts are immediate.
 - The melody auto-plays for the whole run — each note sounds exactly as it
   crosses the judgment line. Your taps are silent judgment only.
 - Press `/` in the song list to search: built-in and external packs filter
-  live by Chinese title, English title or id, and a group header stays
+  live by Chinese title, English title or id; search rows show both titles
+  with the matched characters highlighted, and a group header stays
   visible while anything under it matches. `Esc` clears the search; a second
   `Esc` returns to the main menu.
 - Canon's timbre is locked to the didgeridoo; Turkish March, Minuet in G, and

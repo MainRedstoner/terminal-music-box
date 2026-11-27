@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, List, Optional, Tuple
 
-from .ansi import Screen, text_width, C
+from .ansi import Screen, char_width, text_width, C
 from .theme import Theme
 
 Region = Tuple[int, int, int, int, Any]
@@ -106,6 +106,91 @@ def draw_search_field(screen: Screen, x: int, y: int, w: int, query: str,
         line = "/" + query + cursor
     screen.text(x, y, line, C.white, None, True)
     return text_width(line)
+
+
+def fit_text(s: str, width: int) -> str:
+    """Truncate s to at most `width` display columns (CJK-aware)."""
+    if text_width(s) <= width:
+        return s
+    out: List[str] = []
+    used = 0
+    for ch in s:
+        cw = char_width(ch)
+        if used + cw > width:
+            break
+        out.append(ch)
+        used += cw
+    return "".join(out)
+
+
+def match_spans(text: str, query: str) -> List[Tuple[int, int]]:
+    """Character-index spans where the casefolded query occurs in text."""
+    q = query.casefold()
+    if not q:
+        return []
+    folded = text.casefold()
+    if len(folded) != len(text):  # casefold rescaled a char: try plain lower()
+        folded = text.lower()
+        if len(folded) != len(text):
+            return []
+    spans: List[Tuple[int, int]] = []
+    i = folded.find(q)
+    while i != -1:
+        spans.append((i, i + len(q)))
+        i = folded.find(q, i + 1)
+    return spans
+
+
+def draw_text_highlighted(screen: Screen, x: int, y: int, text: str, query: str,
+                          fg=None, bg=None, bold=False) -> int:
+    """Draw text with every query match chipped in gold; returns the next column.
+
+    Expects pre-truncated text (see fit_text) — matching runs on what is drawn
+    so spans always line up.
+    """
+    cx = x
+    pos = 0
+    for s, e in match_spans(text, query):
+        if s > pos:
+            cx = screen.text(cx, y, text[pos:s], fg, bg, bold)
+        cx = screen.text(cx, y, text[s:e], C.black, C.gold, bold)
+        pos = e
+    if pos < len(text):
+        cx = screen.text(cx, y, text[pos:], fg, bg, bold)
+    return cx
+
+
+def draw_search_result_row(screen: Screen, x: int, y: int, w: int, primary: str,
+                           secondary: Optional[str], query: str, selected: bool,
+                           theme: Theme, hits: Optional[HitMap] = None,
+                           action: Any = None) -> None:
+    """A list row while searching: the entry's full names in both languages.
+
+    The primary name is the active UI language's, the secondary the other
+    language's (dim on unselected rows); matched characters get a gold chip
+    in either. Mirrors draw_menu_row's selection styling and hit registration.
+    """
+    if selected:
+        screen.fill(x, y, w, 1, " ", C.black, C.cyan)
+        screen.text(x + 1, y, "> ", C.black, C.cyan, True)
+    else:
+        screen.fill(x, y, w, 1, " ", None, None)
+    end = x + w
+    cx = x + 3
+    base_bg = C.cyan if selected else None
+    room = end - cx
+    if room > 0:
+        cx = draw_text_highlighted(screen, cx, y, fit_text(primary, room), query,
+                                   C.black if selected else C.white, base_bg,
+                                   selected)
+    if secondary:
+        sx = cx + 2
+        room = end - sx
+        if room > 0:
+            draw_text_highlighted(screen, sx, y, fit_text(secondary, room), query,
+                                  C.black if selected else C.dim, base_bg, False)
+    if hits is not None and action is not None:
+        hits.add(x, y, w, 1, action)
 
 
 def center_text(screen: Screen, y: int, text: str, fg=None, bg=None, bold=False) -> None:

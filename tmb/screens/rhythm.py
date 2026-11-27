@@ -7,7 +7,7 @@ from ..ansi import Screen as Buffer, C, text_width
 from ..events import (KeyEvent, ENTER, SPACE, TAB, BACKSPACE, is_exit,
                       UP, DOWN, LEFT, RIGHT)
 from ..ui import (center_text, draw_box, draw_button, draw_menu_row,
-                  draw_search_field, matches)
+                  draw_search_field, draw_search_result_row, matches)
 from .base import Screen
 from .. import songs
 
@@ -298,12 +298,22 @@ class RhythmMenuScreen(Screen):
             else:
                 idx = self.row_of_song[i]
                 item = row[2] or songs.SONGS[row[1]]
-                draw_menu_row(
-                    scr, x + 1, y, song_w - 2, item.title(lang),
-                    song_active and idx == self.song_index, th,
-                    fg=C.white if song_active else C.gray, hits=self.hits,
-                    action=(lambda k=idx: self._start_song(k)),
-                )
+                if self.searching:
+                    # Full name in both languages, matches highlighted.
+                    draw_search_result_row(
+                        scr, x + 1, y, song_w - 2, item.title(lang),
+                        item.title("en" if lang == "zh" else "zh"),
+                        self.query, song_active and idx == self.song_index, th,
+                        hits=self.hits,
+                        action=(lambda k=idx: self._start_song(k)),
+                    )
+                else:
+                    draw_menu_row(
+                        scr, x + 1, y, song_w - 2, item.title(lang),
+                        song_active and idx == self.song_index, th,
+                        fg=C.white if song_active else C.gray, hits=self.hits,
+                        action=(lambda k=idx: self._start_song(k)),
+                    )
         if self.searching and not self.song_rows:
             scr.text(x + 3, list_y, th.t("search.no_match"), C.dim)
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import unittest
 
 from tmb import songs
+from tmb.ansi import C
 
 try:
     from tests.helpers import HeadlessCase
@@ -169,6 +170,27 @@ class SongSelect(HeadlessCase):
         self.assertFalse(s.searching)
         self.assertEqual(s.query, "")
         self.assertEqual(s.visible, list(range(len(songs.RHYTHM_ORDER))))
+
+    def test_search_rows_show_both_language_names(self):
+        self.open()
+        self.press("/")
+        for ch in "elise":
+            self.press(ch)
+        # the row carries the full Chinese and English title side by side
+        self.assertIn("致爱丽丝", self.frame)
+        self.assertIn("Für Elise", self.frame)
+
+    def test_matched_characters_get_a_gold_chip(self):
+        self.open()
+        self.press("/")
+        for ch in "elise":
+            self.press(ch)
+        x, y = self.find_label("Für Elise")
+        row = self.term.screen.cells[y]
+        # exactly the five "elise" characters are chipped; the Chinese name,
+        # which the query does not match, is not
+        gold = [cell for cell in row if cell[2] == C.gold]
+        self.assertEqual(len(gold), 5)
 
 
 class SongSelectAscii(HeadlessCase):

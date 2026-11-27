@@ -7,7 +7,7 @@ from ..ansi import Screen as Buffer, C
 from ..events import (KeyEvent, MouseEvent, is_exit, UP, DOWN, ENTER, SPACE,
                       BACKSPACE, HOME, END, PGUP, PGDN)
 from ..ui import (HitMap, draw_box, draw_menu_row, center_text,
-                  draw_search_field, matches)
+                  draw_search_field, draw_search_result_row, matches)
 
 NAV_KEYS = (UP, DOWN, HOME, END, PGUP, PGDN, ENTER)
 
@@ -74,6 +74,7 @@ class ListScreen(Screen):
         self.actions: List[Callable] = []
         self.keywords: List[List[str]] = []
         self.visible: List[int] = []
+        self.sublabels: Optional[List[str]] = None  # other-language name per item
         self.index = 0
         self.scroll = 0
         self.footer = ""
@@ -82,13 +83,17 @@ class ListScreen(Screen):
         self.query = ""
 
     def set_items(self, items: List[str], actions: List[Callable],
-                  keywords: Optional[List[List[str]]] = None) -> None:
+                  keywords: Optional[List[List[str]]] = None,
+                  sublabels: Optional[List[str]] = None) -> None:
         self.items = list(items)
         self.actions = list(actions)
         if keywords is not None:
             self.keywords = [list(aliases) for aliases in keywords]
         else:
             self.keywords = [[label] for label in self.items]
+        self.sublabels = (list(sublabels)
+                          if sublabels is not None and len(sublabels) == len(items)
+                          else None)
         # A picker re-entered from scratch starts with a clean field.
         self.searching = False
         self.query = ""
@@ -194,8 +199,16 @@ class ListScreen(Screen):
                 if self.searching and r == 0:
                     scr.text(bx + 1, y + r, th.t("search.no_match"), C.dim)
                 break
-            draw_menu_row(scr, bx + 1, y + r, bw - 2, self.items[self.visible[vi]],
-                          vi == self.index, th,
-                          hits=self.hits, action=(lambda idx=vi: self._select(idx)))
+            item = self.visible[vi]
+            if self.searching:
+                draw_search_result_row(
+                    scr, bx + 1, y + r, bw - 2, self.items[item],
+                    self.sublabels[item] if self.sublabels else None,
+                    self.query, vi == self.index, th,
+                    hits=self.hits, action=(lambda idx=vi: self._select(idx)))
+            else:
+                draw_menu_row(scr, bx + 1, y + r, bw - 2, self.items[item],
+                              vi == self.index, th,
+                              hits=self.hits, action=(lambda idx=vi: self._select(idx)))
         if self.footer:
             center_text(scr, h - 2, self.footer, C.dim)

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import unittest
 
+from tmb.ansi import C
 from tmb.audio import synth
 
 try:
@@ -47,6 +48,26 @@ class TimbreSelect(HeadlessCase):
         for ch in "iron_x":
             self.press(ch)
         self.assertEqual(s.visible, [synth.ORDER.index("iron_xylophone")])
+
+    def test_search_rows_show_both_language_names(self):
+        self.open_picker()
+        self.press("/")
+        for ch in "harp":
+            self.press(ch)
+        # whichever language the UI is in, the row shows the full other name too
+        self.assertIn("Harp", self.frame)
+        self.assertIn("竖琴（钢琴）", self.frame)
+
+    def test_matched_characters_get_a_gold_chip(self):
+        self.open_picker()
+        self.press("/")
+        for ch in "harp":
+            self.press(ch)
+        x, y = self.find_label("Harp")
+        row = self.term.screen.cells[y]
+        # exactly the four "harp" characters of the English name are chipped
+        gold = [cell for cell in row if cell[2] == C.gold]
+        self.assertEqual(len(gold), 4)
 
     def test_esc_cancels_the_search_then_a_second_esc_leaves(self):
         s = self.open_picker()
