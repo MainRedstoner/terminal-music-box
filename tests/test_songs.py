@@ -165,6 +165,86 @@ class Library(unittest.TestCase):
         notes = songs.seq([(60, 1)], bpm=60, start=2.0)
         self.assertAlmostEqual(notes[0].time, 2.0)
 
+    def test_seq_takes_per_note_velocity(self):
+        notes = songs.seq([(60, 1), (62, 1, 0.5), (64, 2)], bpm=120)
+        self.assertEqual([n.vel for n in notes], [1.0, 0.5, 1.0])
+
+    def test_timed_takes_per_note_velocity(self):
+        notes = songs.timed([(0, 60, 4), (4, 62, 4, 0.5)], bpm=120)
+        self.assertEqual([n.vel for n in notes], [1.0, 0.5])
+
+    def test_dynamics_follow_the_source_editions(self):
+        # The numeric scores carry exactly the dynamics their source notates:
+        # the two Baroque pieces have none, Für Elise is pp throughout, and
+        # the Turkish March follows the Mutopia typeset's dynamics voice.
+        for sid in ("canon", "minuet_g"):
+            song = songs.SONGS[sid]
+            with self.subTest(song=sid):
+                self.assertTrue(all(n.vel == 1.0 for n in song.notes))
+        fur = songs.SONGS["fur_elise"]
+        self.assertTrue(all(abs(n.vel - songs.DYNAMIC_LEVELS["pp"]) < 1e-9
+                            for n in fur.notes))
+        turkish = songs.SONGS["turkish_march"]
+        spb = 60.0 / turkish.bpm
+
+        def vel_at(beat):
+            return {round(n.vel, 6) for n in turkish.notes
+                    if abs(n.time - beat * spb) < 1e-9}
+
+        self.assertEqual(vel_at(0), {songs.DYNAMIC_LEVELS["p"]})
+        self.assertEqual(vel_at(16), {songs.DYNAMIC_LEVELS["mp"]})
+        self.assertEqual(vel_at(48), {songs.DYNAMIC_LEVELS["f"]})
+        self.assertEqual(vel_at(128), {songs.DYNAMIC_LEVELS["p"]})
+        self.assertEqual(vel_at(254), {songs.DYNAMIC_LEVELS["ff"]})
+        # A hairpin interpolates between the levels in force.
+        inside = next(iter(vel_at(70)))
+        self.assertBetween(inside, songs.DYNAMIC_LEVELS["p"],
+                           songs.DYNAMIC_LEVELS["mp"])
+
+    def assertBetween(self, value, low, high):
+        self.assertGreater(value, low)
+        self.assertLess(value, high)
+
+
+class Dynamics(unittest.TestCase):
+    """apply_dynamics transcribes a source edition's markings."""
+
+    def song(self, beats):
+        items = [(60 + k, b) for k, b in enumerate(beats)]
+        return songs.seq(items, bpm=60)  # 1 beat per second
+
+    def test_steps_hold_from_their_beat_on(self):
+        notes = self.song([1, 1, 1, 1])
+        songs.apply_dynamics(notes, 60, [(2.0, "p")])
+        self.assertEqual([n.vel for n in notes],
+                         [1.0, 1.0, songs.DYNAMIC_LEVELS["p"],
+                          songs.DYNAMIC_LEVELS["p"]])
+
+    def test_ramps_interpolate_between_levels(self):
+        notes = self.song([1, 1, 1, 1, 1])
+        songs.apply_dynamics(notes, 60, [(1.0, "f", 3.0), (3.0, "p")])
+        self.assertAlmostEqual(notes[0].vel, 1.0)
+        self.assertAlmostEqual(notes[1].vel, 1.0)
+        self.assertAlmostEqual(notes[2].vel,
+                               (1.0 + songs.DYNAMIC_LEVELS["f"]) / 2)
+        # The step that ends a hairpin wins at the shared beat.
+        self.assertAlmostEqual(notes[3].vel, songs.DYNAMIC_LEVELS["p"])
+        self.assertAlmostEqual(notes[4].vel, songs.DYNAMIC_LEVELS["p"])
+
+    def test_notes_before_the_first_marking_play_at_base(self):
+        notes = self.song([1, 1, 1])
+        songs.apply_dynamics(notes, 60, [(2.0, "pp")])
+        self.assertEqual(notes[0].vel, 1.0)
+        self.assertEqual(notes[1].vel, 1.0)
+        self.assertEqual(notes[2].vel, songs.DYNAMIC_LEVELS["pp"])
+
+    def test_marks_do_not_move_times_or_pitches(self):
+        notes = self.song([1, 1, 1])
+        times = [n.time for n in notes]
+        songs.apply_dynamics(notes, 60, [(0.0, "f"), (2.0, "pp")])
+        self.assertEqual([n.time for n in notes], times)
+        self.assertEqual([n.midi for n in notes], [60, 61, 62])
+
 
 class Beatmaps(unittest.TestCase):
     def test_every_beatmap_matches_its_song(self):
@@ -646,13 +726,13 @@ class ClockEngine:
 
     def __init__(self):
         self.now = 0.0
-        self.played = []  # (midi, delay)
+        self.played = []  # (midi, delay, vel)
 
     def time(self):
         return self.now
 
     def play_note(self, tid, midi, dur, vel=1.0, length=None, delay=0):
-        self.played.append((midi, delay))
+        self.played.append((midi, delay, vel))
 
     def stop_all(self):
         self.played.clear()
@@ -682,7 +762,7 @@ class PlayerAudioClock(unittest.TestCase):
         self.p.start()
         self.eng.now = 0.47  # 30 ms before the 0.5 s note
         self.p.update(0.016)
-        self.assertEqual([m for m, _ in self.eng.played], [60, 62])
+        self.assertEqual([m for m, _, _ in self.eng.played], [60, 62])
         self.assertEqual(self.eng.played[0][1], 0)
         self.assertLessEqual(abs(self.eng.played[1][1] - 0.03 * self.eng.sr), 1)
 
@@ -690,8 +770,22 @@ class PlayerAudioClock(unittest.TestCase):
         self.p.start()
         self.eng.now = 2.0
         self.p.update(0.016)
-        self.assertEqual([m for m, _ in self.eng.played], [60, 62, 64])
-        self.assertEqual([d for _, d in self.eng.played], [0, 0, 0])
+        self.assertEqual([m for m, _, _ in self.eng.played], [60, 62, 64])
+        self.assertEqual([d for _, d, _ in self.eng.played], [0, 0, 0])
+
+    def test_the_score_velocity_reaches_the_engine(self):
+        # 强弱: the player hands each note's vel times the user's volume to
+        # the mixer, so the rhythm game and prenatal auto-play both follow
+        # the score's dynamics.
+        song = songs.Song("dyn", "强弱", "Dynamics", 120, [
+            songs.Note(0.0, 60, 0.2, vel=0.5),
+            songs.Note(0.5, 62, 0.2, vel=1.0),
+        ])
+        p = songs.SongPlayer(self.eng, song, "harp", vol=0.8)
+        p.start()
+        self.eng.now = 1.0
+        p.update(0.016)
+        self.assertEqual([v for _, _, v in self.eng.played], [0.4, 0.8])
 
     def test_pause_freezes_and_resume_continues_from_the_frozen_position(self):
         self.p.start()

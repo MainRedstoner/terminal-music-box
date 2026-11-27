@@ -4,6 +4,12 @@ A Song is a list of timed notes used by prenatal mode (auto playback). A
 Beatmap is a list of timed lane notes used by the rhythm game.
 `beatmap_from_song` derives a playable chart from a melody. The library below
 is extended with more public-domain melodies.
+
+Notes carry a velocity (强弱): `seq`/`timed` accept one per note, and
+`apply_dynamics` transcribes the markings of a source edition. Scores carry
+dynamics only where their source notates them — the two Baroque pieces have
+none, Für Elise is pp throughout, and the Turkish March follows the Mutopia
+typeset's dedicated dynamics voice.
 """
 from __future__ import annotations
 
@@ -11,7 +17,7 @@ import math
 from bisect import bisect_right
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from . import charts
 
@@ -21,7 +27,7 @@ class Note:
     time: float   # seconds from song start
     midi: int
     dur: float    # seconds
-    vel: float = 1.0
+    vel: float = 1.0  # 强弱: relative loudness (1.0 = full strength)
 
 
 @dataclass
@@ -80,21 +86,79 @@ class Beatmap:
 
 
 def seq(items, bpm: float, start: float = 0.0, gate: float = 0.9) -> List[Note]:
-    """Build notes from (midi, beats) pairs. gate shortens dur slightly."""
+    """Build notes from (midi, beats[, vel]) pairs. gate shortens dur slightly.
+
+    The optional third element is the note's velocity (强弱); notes without
+    one play at full strength. midi <= 0 is a rest and keeps its time.
+    """
     spb = 60.0 / bpm
     t = start
     out: List[Note] = []
-    for midi, beats in items:
+    for item in items:
+        midi, beats = item[0], item[1]
         if midi > 0:
-            out.append(Note(t, midi, beats * spb * gate))
+            vel = item[2] if len(item) > 2 else 1.0
+            out.append(Note(t, midi, beats * spb * gate, vel))
         t += beats * spb
     return out
 
 
 def timed(items, bpm: float) -> List[Note]:
-    """Build notes from (start, midi, duration) triples in 32nd notes."""
+    """Build notes from (start, midi, duration[, vel]) tuples in 32nd notes."""
     q = 60.0 / (bpm * 8.0)
-    return [Note(t * q, midi, dur * q) for t, midi, dur in items]
+    out: List[Note] = []
+    for start, midi, dur, *rest in items:
+        vel = rest[0] if rest else 1.0
+        out.append(Note(start * q, midi, dur * q, vel))
+    return out
+
+
+# Notated dynamic levels (强弱), as fractions of full voice gain. The ladder
+# mirrors the written gradations (pp < p < mp < mf < f < ff); hairpin marks
+# interpolate between neighbouring levels. The user's volume setting
+# multiplies on top, so the loudest written level stays at full gain.
+DYNAMIC_LEVELS = {"pp": 0.45, "p": 0.55, "mp": 0.68, "mf": 0.8,
+                  "f": 0.95, "ff": 1.0, "fz": 1.0}
+
+
+def apply_dynamics(notes: List[Note], bpm: float,
+                   marks: Sequence[tuple], *, base: float = 1.0) -> None:
+    """Set every note's vel from the score's own dynamics, in place.
+
+    `marks` transcribes the dynamic markings of the source edition, one
+    entry per marking, in beats from the song start:
+
+    - `(beat, level)` — a step: from this beat on the level holds.
+    - `(beat, level, ramp_end)` — a hairpin: the level interpolates linearly
+      from whatever was in force to `level` across [beat, ramp_end].
+
+    Levels are read from `DYNAMIC_LEVELS`; a note before the first marking
+    plays at `base`. The user's own volume multiplies on top, and notes
+    keep playing unchanged where a source has no markings at all.
+    """
+    spb = 60.0 / bpm
+    # Piecewise level curve: (start, end, level at start, level at end).
+    # A step mark has start == end.
+    segs: List[Tuple[float, float, float, float]] = []
+    level = base
+    for mark in marks:
+        start, name = mark[0], DYNAMIC_LEVELS[mark[1]]
+        end = mark[2] if len(mark) > 2 else mark[0]
+        segs.append((start, end, level, name))
+        level = name
+    starts = [seg[0] for seg in segs]
+    for note in notes:
+        beat = note.time / spb
+        k = bisect_right(starts, beat + 1e-9) - 1
+        if k < 0:
+            note.vel = base
+            continue
+        seg_start, seg_end, vel_from, vel_to = segs[k]
+        if beat >= seg_end or seg_end <= seg_start:
+            note.vel = vel_to
+        else:
+            note.vel = vel_from + (vel_to - vel_from) * ((beat - seg_start)
+                                                         / (seg_end - seg_start))
 
 
 def beatmap_from_song(song: Song, lead_in: float = 2.0) -> Beatmap:
@@ -1307,6 +1371,45 @@ _TURKISH_CHART = [
 ]
 
 _turkish_score = timed(_TURKISH_SCORE, _TURKISH_BPM)
+
+# 强弱: dynamics transcribed from the Mutopia typeset, which carries a
+# dedicated dynamics voice (KV331_3_RondoAllaTurcaNotes.ly). Each entry
+# sits on the beat that voice's skips place it on, counted from the pickup:
+# p on the opening turn, mp when the B section chords enter, the echo
+# hairpins inside the B half-repeats, fz spikes where the crescendos land,
+# f at every chordal section, p for the reprise, and ff on the final chords.
+_TURKISH_DYNAMICS = [
+    (0.0, "p"),                       # the pickup turn
+    (16.0, "mp"),                     # B section entrance
+    (32.0, "p"),                      # B half-repeat, echo
+    (37.0, "f", 39.0),                # crescendo into the cadence...
+    (39.0, "fz"),                     # ...landing on its halved-quarter C
+    (39.5, "p"),
+    (48.0, "f"),                      # A major: the chorale octaves
+    (64.0, "p"),                      # D section
+    (69.0, "mp", 71.0),               # echo hairpin (< >)
+    (71.0, "p", 73.0),
+    (80.0, "f"),                      # E section
+    (96.0, "p"),                      # D material returns inside E
+    (101.0, "mp", 103.0),             # echo hairpin (< !)
+    (104.0, "mf", 105.0),             # short cresc, then back down
+    (105.0, "p", 109.0),              # decrescendo to p
+    (112.0, "f"),                     # E section coda
+    (128.0, "p"),                     # the A reprise, whole turn echo
+    (144.0, "mp"),                    # B section again
+    (160.0, "p"),                     # B half-repeat, echo
+    (165.0, "f", 167.0),              # crescendo into the cadence...
+    (167.0, "fz"),                    # ...landing on its halved-quarter C
+    (167.5, "p"),
+    (176.0, "f"),                     # A major: the chorale octaves again
+    (194.0, "f"),                     # coda: held chord
+    (206.0, "f"),                     # coda: strummed chords
+    (218.0, "f"),                     # coda: strummed chords
+    (232.0, "p"),                     # coda: soft echo chords
+    (250.0, "f"),                     # coda: closing chords
+    (253.0, "ff"),                    # the final chords
+]
+apply_dynamics(_turkish_score, _TURKISH_BPM, _TURKISH_DYNAMICS)
 _turkish_chart = timed(_TURKISH_CHART, _TURKISH_BPM)
 register(Song("turkish_march", "土耳其进行曲", "Turkish March", _TURKISH_BPM,
               _turkish_score, chart_notes=_turkish_chart, timbre="pling"))
@@ -1634,6 +1737,12 @@ def _fur_elise_part(events) -> List[Note]:
 
 _fur_elise_right = _fur_elise_part(_FUR_ELISE_RIGHT)
 _fur_elise_left = _fur_elise_part(_FUR_ELISE_LEFT)
+# 强弱: the Breitkopf & Härtel edition marks pp on the very first note
+# ("Poco moto") and pp again at the chromatic triplet run (beat 150) — the
+# only dynamics in the piece. Everything in between sits at the same level,
+# so a single step carries both markings.
+apply_dynamics(_fur_elise_right, _FUR_ELISE_BPM, [(0.0, "pp")])
+apply_dynamics(_fur_elise_left, _FUR_ELISE_BPM, [(0.0, "pp")])
 _fur_elise_notes = sorted(_fur_elise_right + _fur_elise_left,
                           key=lambda n: n.time)
 
