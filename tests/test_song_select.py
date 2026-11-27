@@ -17,24 +17,30 @@ class SongSelect(HeadlessCase):
         self.app.step(0.016)
         return self.app.current
 
-    def test_items_are_every_song_in_order(self):
+    def test_items_are_the_rhythm_songs_in_order(self):
         s = self.open()
-        self.assertEqual(s.items, [songs.SONGS[sid].title("zh") for sid in songs.ORDER])
-        self.assertEqual(len(s.actions), len(songs.ORDER))
+        self.assertEqual(s.items, [songs.SONGS[sid].title("zh")
+                                   for sid in songs.RHYTHM_ORDER])
+        self.assertEqual(len(s.actions), len(songs.RHYTHM_ORDER))
         self.assertEqual(s.title, self.app.theme.t("song.select"))
 
     def test_index_defaults_to_the_configured_song(self):
-        self.cfg.prenatal_song = "canon"
+        self.cfg.prenatal_song = "fur_elise"
         s = self.open()
-        self.assertEqual(s.index, songs.ORDER.index("canon"))
+        self.assertEqual(s.index, songs.RHYTHM_ORDER.index("fur_elise"))
 
     def test_selected_kwarg_overrides_the_config(self):
         self.cfg.prenatal_song = "canon"
-        s = self.open(selected="jingle_bells")
-        self.assertEqual(s.index, songs.ORDER.index("jingle_bells"))
+        s = self.open(selected="turkish_march")
+        self.assertEqual(s.index, songs.RHYTHM_ORDER.index("turkish_march"))
 
     def test_unknown_selection_keeps_index_zero(self):
         s = self.open(selected="nope")
+        self.assertEqual(s.index, 0)
+
+    def test_song_outside_the_rhythm_list_keeps_index_zero(self):
+        self.cfg.prenatal_song = "twinkle"
+        s = self.open()
         self.assertEqual(s.index, 0)
 
     def test_picking_saves_the_config_and_calls_back(self):
@@ -42,7 +48,7 @@ class SongSelect(HeadlessCase):
         self.open(on_select=seen.append, back="menu")
         self.press("down")
         self.press("enter")
-        sid = songs.ORDER[1]
+        sid = songs.RHYTHM_ORDER[1]
         self.assertEqual(seen, [sid])
         self.assertEqual(self.cfg.prenatal_song, sid)
         self.assertEqual(self.read_config()["prenatal_song"], sid)
@@ -52,7 +58,7 @@ class SongSelect(HeadlessCase):
         self.open()
         self.press("enter")
         self.assertEqual(self.app.current_name, "freeplay")
-        self.assertEqual(self.cfg.prenatal_song, songs.ORDER[0])
+        self.assertEqual(self.cfg.prenatal_song, songs.RHYTHM_ORDER[0])
 
     def test_escape_leaves_the_choice_untouched(self):
         seen = []
@@ -67,18 +73,18 @@ class SongSelect(HeadlessCase):
     def test_mouse_click_picks_the_clicked_row(self):
         seen = []
         self.open(on_select=seen.append, back="menu")
-        self.click_label(songs.SONGS["happy_birthday"].title("zh"))
-        self.assertEqual(seen, ["happy_birthday"])
+        self.click_label(songs.SONGS["fur_elise"].title("zh"))
+        self.assertEqual(seen, ["fur_elise"])
         self.assertEqual(self.app.current_name, "menu")
 
     def test_home_end_and_page_keys(self):
         s = self.open()
         self.press("end")
-        self.assertEqual(s.index, len(songs.ORDER) - 1)
+        self.assertEqual(s.index, len(songs.RHYTHM_ORDER) - 1)
         self.press("home")
         self.assertEqual(s.index, 0)
         self.press("pgdn")
-        self.assertEqual(s.index, min(5, len(songs.ORDER) - 1))
+        self.assertEqual(s.index, min(5, len(songs.RHYTHM_ORDER) - 1))
         self.press("pgup")
         self.assertEqual(s.index, 0)
 
@@ -98,8 +104,8 @@ class SongSelectAscii(HeadlessCase):
         self.app.navigate("song_select")
         self.step()
         self.assertEqual(self.screen.items,
-                         [songs.SONGS[sid].title("en") for sid in songs.ORDER])
-        self.assertIn("Twinkle Twinkle", self.frame)
+                         [songs.SONGS[sid].title("en") for sid in songs.RHYTHM_ORDER])
+        self.assertIn("Canon in C", self.frame)
 
 
 class SongSelectShort(HeadlessCase):
@@ -108,13 +114,13 @@ class SongSelectShort(HeadlessCase):
     def test_scrolls_to_keep_the_selection_visible(self):
         self.app.navigate("song_select", back="menu")
         s = self.screen
-        for _ in range(len(songs.ORDER) - 1):
+        for _ in range(len(songs.RHYTHM_ORDER) - 1):
             self.press("down")
-        self.assertEqual(s.index, len(songs.ORDER) - 1)
+        self.assertEqual(s.index, len(songs.RHYTHM_ORDER) - 1)
         self.assertGreater(s.scroll, 0)
         self.assertIn(s.items[s.index], self.frame)
         self.press("enter")
-        self.assertEqual(self.cfg.prenatal_song, songs.ORDER[-1])
+        self.assertEqual(self.cfg.prenatal_song, songs.RHYTHM_ORDER[-1])
         self.assertEqual(self.app.current_name, "menu")
 
 

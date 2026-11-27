@@ -217,6 +217,10 @@ class FreePlayScreen(Screen):
             self._waiting = False
 
     def _start_player(self, sid: Optional[str]) -> None:
+        # Prenatal mode only offers the rhythm game's songs; an unset or stale
+        # config value falls back to the first of them.
+        if sid not in songs.RHYTHM_ORDER:
+            sid = songs.RHYTHM_ORDER[0]
         vol, length = self.config.sound_params(self.config.timbre)
         self.player = songs.SongPlayer(self.audio, songs.get_song(sid),
                                        self.config.timbre, vol=vol, length=length)

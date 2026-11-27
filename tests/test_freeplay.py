@@ -134,7 +134,7 @@ class FreePlay(HeadlessCase):
         self.assertIsNotNone(p)
         self.assertTrue(p.playing)
         self.assertTrue(self.screen.prenatal)
-        self.assertEqual(p.song.id, songs.first_song_id())
+        self.assertEqual(p.song.id, songs.RHYTHM_ORDER[0])
         self.assertIn(p.song.title("zh"), self.frame)
         self.assertIn(self.app.theme.t("freeplay.prenatal_hint"), self.frame)
 
@@ -142,6 +142,11 @@ class FreePlay(HeadlessCase):
         self.cfg.prenatal_song = "canon"
         self.press("ctrl+t")
         self.assertEqual(self.screen.player.song.id, "canon")
+
+    def test_ctrl_t_with_a_song_outside_the_rhythm_list_falls_back(self):
+        self.cfg.prenatal_song = "twinkle"
+        self.press("ctrl+t")
+        self.assertEqual(self.screen.player.song.id, songs.RHYTHM_ORDER[0])
 
     def test_ctrl_t_toggles_off_and_silences(self):
         self.press("ctrl+t")
@@ -206,13 +211,18 @@ class FreePlay(HeadlessCase):
         duration = p.song.duration
         prev = 0.0
         wrapped = False
-        for i in range(int((duration + 3.0) / 0.05)):
-            self.step(0.05)
-            if i % 10 == 0:
-                self.term.key("q")
-            if p.pos < prev - 1.0:
-                wrapped = True
-            prev = p.pos
+        rf = self.app.render_frames
+        self.app.render_frames = False
+        try:
+            for i in range(int((duration + 3.0) / 0.05)):
+                self.step(0.05)
+                if i % 10 == 0:
+                    self.term.key("q")
+                if p.pos < prev - 1.0:
+                    wrapped = True
+                prev = p.pos
+        finally:
+            self.app.render_frames = rf
         self.assertTrue(wrapped)
         self.assertTrue(p.playing)
         self.assertLess(p.pos, duration)
@@ -228,9 +238,9 @@ class FreePlay(HeadlessCase):
         self.press("down")
         self.press("enter")
         self.assertEqual(self.app.current_name, "freeplay")
-        self.assertEqual(self.cfg.prenatal_song, "ode_joy")
-        self.assertEqual(self.read_config()["prenatal_song"], "ode_joy")
-        self.assertEqual(self.screen.player.song.id, "ode_joy")
+        self.assertEqual(self.cfg.prenatal_song, "turkish_march")
+        self.assertEqual(self.read_config()["prenatal_song"], "turkish_march")
+        self.assertEqual(self.screen.player.song.id, "turkish_march")
         self.assertTrue(self.screen.player.playing)
 
     def test_ctrl_a_without_a_player_only_stores_the_choice(self):
@@ -239,10 +249,10 @@ class FreePlay(HeadlessCase):
         self.press("down")
         self.press("enter")
         self.assertEqual(self.app.current_name, "freeplay")
-        self.assertEqual(self.cfg.prenatal_song, "mary_lamb")
+        self.assertEqual(self.cfg.prenatal_song, "minuet_g")
         self.assertIsNone(self.screen.player)
         self.press("ctrl+t")
-        self.assertEqual(self.screen.player.song.id, "mary_lamb")
+        self.assertEqual(self.screen.player.song.id, "minuet_g")
 
     def test_song_select_mouse_click_picks_a_song(self):
         self.press("ctrl+a")
@@ -373,8 +383,8 @@ class PrenatalPreload(HeadlessCase):
         self.assertFalse(self.screen._waiting)
         self.assertLess(p.pos, 0.05)
 
-    def test_every_builtin_song_is_preloaded_whole(self):
-        for sid in songs.ORDER:
+    def test_every_prenatal_song_is_preloaded_whole(self):
+        for sid in songs.RHYTHM_ORDER:
             with self.subTest(song=sid):
                 self.engine.preload.reset_mock()
                 self.app.navigate("freeplay")
@@ -382,10 +392,20 @@ class PrenatalPreload(HeadlessCase):
                 self.press("ctrl+t")
                 tid, midis = self.requested()
                 self.assertEqual(tid, self.cfg.timbre)
+                self.assertEqual(self.screen.player.song.id, sid)
                 # The song's complete score, not just the 21 keyboard keys.
                 self.assertLessEqual(set(songs.SONGS[sid].pitches), set(midis))
                 # ...and the keyboard stays warm from the same request.
                 self.assertLessEqual(set(PRELOAD_MIDIS), set(midis))
+
+    def test_a_stale_selection_preloads_the_fallback_song(self):
+        self.cfg.prenatal_song = "twinkle"  # outside the prenatal list
+        self.press("ctrl+t")
+        p = self.screen.player
+        self.assertEqual(p.song.id, songs.RHYTHM_ORDER[0])
+        tid, midis = self.requested()
+        self.assertEqual(tid, self.cfg.timbre)
+        self.assertLessEqual(set(p.song.pitches), set(midis))
 
     def test_switching_timbre_mid_song_reloads_and_resumes_in_place(self):
         self.engine.is_preloaded.return_value = True
@@ -422,7 +442,7 @@ class PrenatalPreload(HeadlessCase):
         self.press("enter")
         self.assertEqual(self.app.current_name, "freeplay")
         p = self.screen.player
-        self.assertEqual(p.song.id, songs.ORDER[0])
+        self.assertEqual(p.song.id, songs.RHYTHM_ORDER[0])
         self.assertTrue(self.screen._waiting)
         self.assertFalse(p.playing)
         tid, midis = self.requested()
@@ -431,7 +451,7 @@ class PrenatalPreload(HeadlessCase):
 
     def test_song_loop_regates_a_cold_cache(self):
         self.engine.is_preloaded.return_value = True
-        self.cfg.prenatal_song = "mary_lamb"
+        self.cfg.prenatal_song = "minuet_g"
         self.press("ctrl+t")
         p = self.screen.player
         duration = p.song.duration

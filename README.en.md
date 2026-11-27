@@ -90,8 +90,8 @@ When on, a lullaby plays automatically and the play keys become a silent
 accompaniment: they still light up and keep the music going, but make no sound.
 Press **any** play key within **2 seconds** to keep it playing; otherwise it
 pauses, and the next key press resumes it. The **Song button** shows only while
-prenatal mode is on; `^A` picks the song at any time (defaults to the first:
-Twinkle Twinkle). Songs loop.
+prenatal mode is on; `^A` picks the song at any time. The choice is limited to
+the rhythm game's four songs (defaults to Canon in C). Songs loop.
 
 Canon, Minuet in G, Turkish March and Für Elise sound pitches outside the
 free-play keyboard: the first start — and any start after a song or timbre
@@ -132,8 +132,9 @@ later starts are immediate.
 
 ## Built-in songs
 
-Eleven public-domain melodies. Prenatal mode includes the full library; the rhythm
-game contains the complete Canon (with falling notes derived from violin I),
+Eleven public-domain melodies. Prenatal mode offers only the rhythm game's four
+songs; the rhythm game contains the complete Canon (with falling notes derived
+from violin I),
 Minuet in G (AABB repeats, right-hand lead banded by note count, mirrored accents),
 Turkish March (right-hand theme on its eighth-note skeleton, complete rondo), and
 Für Elise (top right-hand voice, dense notes on the middle four lanes, mirrored
