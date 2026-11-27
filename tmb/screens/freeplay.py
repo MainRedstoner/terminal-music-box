@@ -75,6 +75,10 @@ class FreePlayScreen(Screen):
         # (see _begin_playback); _wait_started bounds that wait.
         self._waiting = False
         self._wait_started = 0.0
+        # A freshly created player — prenatal just enabled, or its song just
+        # changed — stays silent until the user presses a play key; only that
+        # same key press that keeps prenatal playback alive may start it.
+        self._silent = False
 
     def enter(self, **kw) -> None:
         if self.player is not None:
@@ -93,6 +97,7 @@ class FreePlayScreen(Screen):
             self.player = None
         self.prenatal = False
         self._waiting = False
+        self._silent = False
         self.audio.stop_all()
 
     # Input -------------------------------------------------------------------
@@ -108,8 +113,8 @@ class FreePlayScreen(Screen):
             self._cycle_timbre()
         elif k == "ctrl+t":
             self._toggle_prenatal()
-        elif k == "ctrl+a":
-            self._pick_song()
+        elif k == "ctrl+a" and self.player is not None:
+            self._pick_song()  # song picking only makes sense with prenatal on
         elif k in (UP, DOWN):
             self.focus = 1 - self.focus  # toggle volume / length focus
         elif k in (LEFT, RIGHT):
@@ -136,11 +141,20 @@ class FreePlayScreen(Screen):
     def _press(self, key: str) -> None:
         self.last_activity = self.clock
         self.last_event[key] = self.clock
+        if self.player is not None:
+            # Prenatal mode: keys only keep the auto-play alive, no sound. A
+            # press also wakes a player that is still silent after being
+            # created (prenatal just enabled, or its song just changed);
+            # repeats of an already-held key count too, so this runs before
+            # the key_down check below.
+            self._silent = False
+            if self.key_down.get(key, False):
+                return
+            self.key_down[key] = True
+            return
         if self.key_down.get(key, False):
             return
         self.key_down[key] = True
-        if self.player is not None:
-            return  # prenatal mode: keys only keep the auto-play alive, no sound
         midi = KEY_MIDI[key]
         vol, length = self.config.sound_params(self.config.timbre)
         if self.app.release_events() and synth.get_timbre(self.config.timbre).sustain:
@@ -213,6 +227,7 @@ class FreePlayScreen(Screen):
             self.player = None
             self.prenatal = False
             self._waiting = False
+            self._silent = False
 
     def _start_player(self, sid: Optional[str]) -> None:
         # Prenatal mode only offers the rhythm game's songs; an unset or stale
@@ -222,7 +237,10 @@ class FreePlayScreen(Screen):
         vol, length = self.config.sound_params(self.config.timbre)
         self.player = songs.SongPlayer(self.audio, songs.get_song(sid),
                                        self.config.timbre, vol=vol, length=length)
-        self.last_activity = self.clock
+        # Enabling prenatal (or changing its song) must not start the melody
+        # on its own: stay silent until the user presses a play key. _silent
+        # outranks the fresh activity timestamp _begin_playback sets below.
+        self._silent = True
         self._begin_playback(restart=True)
 
     def _pick_song(self) -> None:
@@ -309,16 +327,13 @@ class FreePlayScreen(Screen):
             if self._waiting:
                 if self._ensure_buffers():
                     self._waiting = False
-                    self.last_activity = self.clock
-                    p.resume()
                 elif self.clock - self._wait_started > WAIT_TIMEOUT:
-                    # A wedged render must not mute the instrument for good:
-                    # play anyway and take the stalls as they come.
+                    # A wedged render must not wedge the screen for good:
+                    # stop waiting and take the stalls as they come. Playback
+                    # itself still waits for the user's play key below.
                     self._waiting = False
-                    self.last_activity = self.clock
-                    p.resume()
             if not self._waiting:
-                if self.clock - self.last_activity > ACTIVITY_WINDOW:
+                if self._silent or self.clock - self.last_activity > ACTIVITY_WINDOW:
                     p.pause()
                 else:
                     p.resume()

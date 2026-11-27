@@ -157,11 +157,18 @@ class FreePlay(HeadlessCase):
         self.press("ctrl+t")
         p = self.screen.player
         self.assertIsNotNone(p)
-        self.assertTrue(p.playing)
         self.assertTrue(self.screen.prenatal)
         self.assertEqual(p.song.id, songs.RHYTHM_ORDER[0])
         self.assertIn(p.song.title("zh"), self.frame)
         self.assertIn(self.app.theme.t("freeplay.prenatal_hint"), self.frame)
+        # Enabling prenatal must not start the melody on its own: it stays
+        # silent until the first play key (the same press that keeps it alive).
+        self.step()  # the frame after the toggle applies the silent gate
+        self.assertFalse(p.playing)
+        self.assertEqual(self.engine.active(), 0)
+        self.press("q")
+        self.step()
+        self.assertTrue(p.playing)
 
     def test_ctrl_t_uses_the_configured_song(self):
         self.cfg.prenatal_song = "canon"
@@ -175,6 +182,7 @@ class FreePlay(HeadlessCase):
 
     def test_ctrl_t_toggles_off_and_silences(self):
         self.press("ctrl+t")
+        self.press("q")  # the silent-started melody needs a play key first
         self.advance(0.5)
         self.assertGreater(self.engine.active(), 0)
         self.press("ctrl+t")
@@ -190,6 +198,9 @@ class FreePlay(HeadlessCase):
     def test_prenatal_pauses_after_the_activity_window(self):
         self.press("ctrl+t")
         p = self.screen.player
+        self.press("q")  # the melody starts silent; a play key starts it
+        self.step()
+        self.assertTrue(p.playing)
         self.advance(ACTIVITY_WINDOW + 0.1, dt=0.05)
         self.assertFalse(p.playing)
         pos = p.pos
@@ -199,6 +210,8 @@ class FreePlay(HeadlessCase):
     def test_prenatal_resumes_on_a_play_key(self):
         self.press("ctrl+t")
         p = self.screen.player
+        self.press("q")  # the melody starts silent; a play key starts it
+        self.step()
         self.advance(ACTIVITY_WINDOW + 0.1, dt=0.05)
         self.assertFalse(p.playing)
         self.press("q")
@@ -266,20 +279,27 @@ class FreePlay(HeadlessCase):
         self.assertEqual(self.cfg.prenatal_song, "turkish_march")
         self.assertEqual(self.read_config()["prenatal_song"], "turkish_march")
         self.assertEqual(self.screen.player.song.id, "turkish_march")
+        # A song change restarts the player, but silent, like a fresh start.
+        self.step()  # the frame after the pick applies the silent gate
+        self.assertFalse(self.screen.player.playing)
+        self.press("q")
+        self.step()
         self.assertTrue(self.screen.player.playing)
 
-    def test_ctrl_a_without_a_player_only_stores_the_choice(self):
+    def test_ctrl_a_without_prenatal_is_ignored(self):
+        # ^A picks the prenatal song, so with prenatal mode off it must not
+        # even open the picker — matching the song button, which only shows
+        # while prenatal mode is on.
         self.press("ctrl+a")
-        self.assertEqual(self.app.current_name, "song_select")
-        self.press("down")
-        self.press("enter")
         self.assertEqual(self.app.current_name, "freeplay")
-        self.assertEqual(self.cfg.prenatal_song, "minuet_g")
+        self.assertIsNone(self.cfg.prenatal_song)
         self.assertIsNone(self.screen.player)
+        # The default fallback still applies when prenatal starts later.
         self.press("ctrl+t")
-        self.assertEqual(self.screen.player.song.id, "minuet_g")
+        self.assertEqual(self.screen.player.song.id, songs.RHYTHM_ORDER[0])
 
     def test_song_select_mouse_click_picks_a_song(self):
+        self.press("ctrl+t")  # ^A needs prenatal on to reach the picker
         self.press("ctrl+a")
         self.click_label(songs.SONGS["canon"].title("zh"))
         self.assertEqual(self.app.current_name, "freeplay")
@@ -437,6 +457,8 @@ class PrenatalPreload(HeadlessCase):
         self.engine.preload_status.return_value = (False, 8, 8)
         self.press("ctrl+t")
         p = self.screen.player
+        self.press("q")  # the melody starts silent; a play key starts it
+        self.step()
         self.assertTrue(p.playing)
         self.advance(0.5)
         pos = p.pos
@@ -459,6 +481,8 @@ class PrenatalPreload(HeadlessCase):
     def test_picking_a_new_song_waits_for_its_buffers(self):
         self.engine.is_preloaded.return_value = True
         self.press("ctrl+t")
+        self.press("q")  # the melody starts silent; a play key starts it
+        self.step()
         self.assertTrue(self.screen.player.playing)
         self.engine.preload.reset_mock()
         self.engine.is_preloaded.return_value = False
@@ -518,8 +542,13 @@ class PrenatalPreload(HeadlessCase):
         p = self.screen.player
         self.assertFalse(p.playing)
         self.advance(WAIT_TIMEOUT + 1.0)
-        self.assertTrue(p.playing)
+        # The wait gives up instead of wedging forever, but playback still
+        # starts only on a play key.
         self.assertFalse(self.screen._waiting)
+        self.assertFalse(p.playing)
+        self.press("q")
+        self.step()
+        self.assertTrue(p.playing)
 
     def test_the_wait_survives_the_song_picker(self):
         self.press("ctrl+t")
@@ -532,6 +561,11 @@ class PrenatalPreload(HeadlessCase):
         self.assertIs(self.screen.player, player)  # the picker keeps the player
         self.assertTrue(self.screen._waiting)
         self.engine.is_preloaded.return_value = True
+        self.step()
+        self.assertFalse(self.screen._waiting)
+        # Buffers landed, but no play key yet: still silent.
+        self.assertFalse(player.playing)
+        self.press("q")
         self.step()
         self.assertTrue(player.playing)
 
@@ -549,9 +583,14 @@ class PrenatalPreload(HeadlessCase):
         self.engine.realtime = False
         self.cfg.prenatal_song = "fur_elise"
         self.press("ctrl+t")
-        self.assertTrue(self.screen.player.playing)
         self.assertFalse(self.screen._waiting)
         self.engine.preload.assert_not_called()
+        # The silent start applies to headless runs too.
+        self.step()
+        self.assertFalse(self.screen.player.playing)
+        self.press("q")
+        self.step()
+        self.assertTrue(self.screen.player.playing)
 
 
 class SoundStrip(HeadlessCase):
