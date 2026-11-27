@@ -228,8 +228,8 @@ git merge main
 ### 2.4 文档
 
 - `README.md`（中文）与 `README.en.md`（英文）必须同步修改，行为变了就更新对应段落。
-- `AGENTS.md` 与 `CLAUDE.md` 里的「分支与工作树规则」是同一份文本，改一处必须改两处；
-  有冲突时以 `AGENTS.md` 为准。
+- 规则只有一份源文件：就是本文件。`CLAUDE.md` 里只有一行 `@AGENTS.md`（Claude Code 的导入
+  语法），**不要往里面抄内容**，免得两份漂移；改规则只改 `AGENTS.md`。
 
 ### 2.5 数据与素材
 
