@@ -62,10 +62,15 @@ class Voice:
     def __init__(self, segments: List[Segment], release: Optional[array] = None,
                  sustain: bool = False, gain: float = 1.0,
                  steady: Optional[array] = None, start: int = 0,
-                 decay: float = 1.0, release_tau: Optional[float] = None):
+                 decay: float = 1.0, release_tau: Optional[float] = None,
+                 delay: int = 0):
         self._segments = segments
         self._idx = 0
         self._pos = start
+        # Frames of silence before the note starts: scheduled playback places
+        # a melody's notes on the exact sample the mixer clock reaches them,
+        # instead of whenever the UI thread happened to call in.
+        self._delay = max(0, int(delay))
         # Frames actually consumed from the segments (mixer thread only);
         # external PCM playback reads this to know where the song is.
         self.consumed = 0
@@ -129,6 +134,14 @@ class Voice:
     def pull(self, n: int) -> array:
         out = zeros(n)
         filled = 0
+        lead = 0
+        if self._delay > 0:
+            # Silent lead-in: everything before `lead` is delay, not note.
+            lead = min(n, self._delay)
+            self._delay -= lead
+            filled = lead
+            if filled >= n:
+                return out
         while filled < n and self._idx < len(self._segments):
             buf, loop = self._segments[self._idx]
             if len(buf) == 0:
@@ -162,9 +175,10 @@ class Voice:
         if self._decay < 1.0:
             # Shortened ringing note: fade the whole voice exponentially.
             # Cheaper than rewriting the shared buffer and keeps the pitch.
+            # Skip the silent lead-in: a delay must not eat into the note.
             g = self._decay_g
             d = self._decay
-            for i in range(n):
+            for i in range(lead, n):
                 out[i] *= g
                 g *= d
             self._decay_g = g
@@ -172,9 +186,9 @@ class Voice:
                 self.done = True
         if self._fade_left > 0:
             played = self._fade_total - self._fade_left
-            take = min(n, self._fade_left)
+            take = min(n - lead, self._fade_left)
             for i in range(take):
-                out[i] *= 0.5 + 0.5 * math.cos(math.pi * (played + i + 1) / self._fade_total)
+                out[lead + i] *= 0.5 + 0.5 * math.cos(math.pi * (played + i + 1) / self._fade_total)
             self._fade_left -= take
             if self._fade_left <= 0:
                 self.done = True
@@ -505,7 +519,7 @@ class AudioEngine:
         return self._add(v)
 
     def play_note(self, tid: str, midi: int, dur: float, vel: float = 1.0,
-                  length: Optional[float] = None) -> int:
+                  length: Optional[float] = None, delay: int = 0) -> int:
         """Play a fixed-length note.
 
         `length` is the user's per-timbre note-length multiplier (None/1.0 =
@@ -514,6 +528,9 @@ class AudioEngine:
         so the note keeps its pitch instead of being sliced; sustained timbres
         are assembled at the shorter duration. Values above 1 only extend
         sustained timbres: ringing ones cannot outlast their natural buffer.
+
+        `delay` holds the note silent for that many frames, which schedules it
+        on a mixer-clock sample instead of on the caller's frame.
         """
         nb = self._buffers(tid, midi)
         t = get_timbre(tid)
@@ -526,7 +543,8 @@ class AudioEngine:
             # Hit -60 dB at len*mult: the note sounds shorter, but its tail
             # glides down instead of being cut mid-ring.
             decay = _length_decay(len(buf), mult)
-        return self._add(Voice([(buf, False)], gain=vel, decay=decay))
+        return self._add(Voice([(buf, False)], gain=vel, decay=decay,
+                               delay=delay))
 
     def _add(self, v: Voice) -> int:
         with self._lock:
@@ -577,6 +595,11 @@ class AudioEngine:
 
     def time(self) -> float:
         return self._samples / self.sr
+
+    @property
+    def running(self) -> bool:
+        """True once start() opened the device; time() only moves then."""
+        return self._running
 
     def active(self) -> int:
         with self._lock:

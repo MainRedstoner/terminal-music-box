@@ -255,6 +255,12 @@ class SongPlayer:
     scales every note's velocity, length rescales each note's duration.
     """
 
+    # How far ahead of the melody clock notes are handed to the mixer when the
+    # audio clock is available. The frame loop then only decides when to look;
+    # each note is placed on the exact sample the mixer reaches, so a late or
+    # clamped frame cannot jitter or shift the onsets.
+    SCHEDULE_LOOKAHEAD = 0.05
+
     def __init__(self, engine, song: Song, timbre: str,
                  vol: float = 1.0, length: float = 1.0):
         self.engine = engine
@@ -262,10 +268,33 @@ class SongPlayer:
         self.timbre = timbre
         self.vol = vol
         self.length = length
+        # While realtime the melody follows the mixer's generated-sample
+        # clock, which advances exactly as fast as the device consumes audio:
+        # summing frame deltas (and app.step's 100 ms clamp) would instead let
+        # a slow frame shift the tempo and quantise every onset to a frame.
+        # Headless/offline runs have no running mixer and keep counting dt.
+        live = getattr(engine, "realtime", False) and getattr(engine, "running", False)
+        self._clock = engine.time if live else None
         self.pos = 0.0
         self.idx = 0
         self.playing = False
         self.finished = False
+
+    @property
+    def pos(self) -> float:
+        return self._pos
+
+    @pos.setter
+    def pos(self, value: float) -> None:
+        # Every reposition (start, loop restart, chart sync, a direct write
+        # from the rhythm screen) takes a fresh clock anchor; keeping the old
+        # one would snap the melody back on the next update.
+        self._pos = float(value)
+        self._anchor()
+
+    def _anchor(self) -> None:
+        self._base = self._pos
+        self._t0 = self._clock() if self._clock is not None else 0.0
 
     def start(self) -> None:
         self.pos = 0.0
@@ -277,8 +306,12 @@ class SongPlayer:
         self.playing = False
 
     def resume(self) -> None:
-        if not self.finished:
-            self.playing = True
+        if self.finished or self.playing:
+            return
+        # Continue from where the pause froze the melody, not from wherever
+        # the audio clock has run to since.
+        self._anchor()
+        self.playing = True
 
     def stop(self) -> None:
         self.playing = False
@@ -300,12 +333,25 @@ class SongPlayer:
     def update(self, dt: float) -> None:
         if not self.playing or self.finished:
             return
-        self.pos += dt
+        if self._clock is not None:
+            self._pos = self._base + (self._clock() - self._t0)
+        else:
+            self._pos += dt
         notes = self.song.notes
-        while self.idx < len(notes) and notes[self.idx].time <= self.pos:
+        horizon = self._pos
+        if self._clock is not None:
+            horizon += self.SCHEDULE_LOOKAHEAD
+        while self.idx < len(notes) and notes[self.idx].time <= horizon:
             n = notes[self.idx]
+            delay = 0
+            if self._clock is not None:
+                # Read the clock again per note: assembling a sustained voice
+                # takes real time, and a stale `pos` would schedule the tail
+                # of a burst later than the notes in front of it.
+                now = self._base + (self._clock() - self._t0)
+                delay = int(max(0.0, n.time - now) * self.engine.sr)
             self.engine.play_note(self.timbre, n.midi, n.dur * self.length,
-                                  n.vel * self.vol)
+                                  n.vel * self.vol, delay=delay)
             self.idx += 1
         if self.idx >= len(notes) and self.pos >= self.song.duration:
             self.finished = True

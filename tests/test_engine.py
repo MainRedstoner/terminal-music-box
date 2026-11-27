@@ -87,6 +87,24 @@ class VoiceBookkeeping(unittest.TestCase):
         vid = self.eng.note_on("bit", 60, 0.4)
         self.assertAlmostEqual(self.eng._voices[vid].gain, 0.4)
 
+    def test_a_delayed_voice_holds_silence_until_its_sample(self):
+        vid = self.eng.play_note("harp", 60, 0.5, delay=300)
+        v = self.eng._voices[vid]
+        self.assertEqual(peak(v.pull(128)), 0.0)
+        self.assertEqual(peak(v.pull(172)), 0.0)  # exactly 300 frames of lead-in
+        self.assertFalse(v.done)                  # a lead-in is not the note ending
+        self.assertGreater(peak(v.pull(128)), 0.05)
+
+    def test_a_delay_does_not_eat_into_the_decay_curve(self):
+        plain = self.eng._voices[self.eng.play_note("harp", 60, 1.0, length=0.5)]
+        delayed = self.eng._voices[self.eng.play_note("harp", 60, 1.0, length=0.5,
+                                                      delay=256)]
+        delayed.pull(256)  # consume the lead-in
+        for _ in range(3):
+            a = peak(plain.pull(256))
+            b = peak(delayed.pull(256))
+            self.assertAlmostEqual(a, b, places=6)
+
     def test_play_note_length_one_keeps_the_natural_buffer(self):
         natural = self.eng._buffers("harp", 60).oneshot
         vid = self.eng.play_note("harp", 60, 1.0)

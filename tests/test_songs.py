@@ -637,5 +637,99 @@ class Player(unittest.TestCase):
         self.assertEqual(self.eng.active(), 0)
 
 
+class ClockEngine:
+    """Realtime-shaped engine: the audio clock only moves when the test says so."""
+
+    realtime = True
+    running = True
+    sr = 44100
+
+    def __init__(self):
+        self.now = 0.0
+        self.played = []  # (midi, delay)
+
+    def time(self):
+        return self.now
+
+    def play_note(self, tid, midi, dur, vel=1.0, length=None, delay=0):
+        self.played.append((midi, delay))
+
+    def stop_all(self):
+        self.played.clear()
+
+
+class PlayerAudioClock(unittest.TestCase):
+    """A realtime melody follows the mixer clock; frames only schedule ahead."""
+
+    def setUp(self):
+        self.eng = ClockEngine()
+        self.song = songs.Song("clock", "钟", "Clock", 120, [
+            songs.Note(0.0, 60, 0.2),
+            songs.Note(0.5, 62, 0.2),
+            songs.Note(1.0, 64, 0.2),
+        ])
+        self.p = songs.SongPlayer(self.eng, self.song, "harp")
+
+    def test_position_follows_the_audio_clock_not_the_frame_deltas(self):
+        self.p.start()
+        self.eng.now = 0.3
+        self.p.update(0.016)
+        self.assertAlmostEqual(self.p.pos, 0.3)
+        self.p.update(0.5)  # a slow frame (or app.step's dt clamp) moves nothing
+        self.assertAlmostEqual(self.p.pos, 0.3)
+
+    def test_a_note_inside_the_lookahead_is_placed_on_its_exact_sample(self):
+        self.p.start()
+        self.eng.now = 0.47  # 30 ms before the 0.5 s note
+        self.p.update(0.016)
+        self.assertEqual([m for m, _ in self.eng.played], [60, 62])
+        self.assertEqual(self.eng.played[0][1], 0)
+        self.assertLessEqual(abs(self.eng.played[1][1] - 0.03 * self.eng.sr), 1)
+
+    def test_a_stalled_clock_fires_the_overdue_notes_at_once(self):
+        self.p.start()
+        self.eng.now = 2.0
+        self.p.update(0.016)
+        self.assertEqual([m for m, _ in self.eng.played], [60, 62, 64])
+        self.assertEqual([d for _, d in self.eng.played], [0, 0, 0])
+
+    def test_pause_freezes_and_resume_continues_from_the_frozen_position(self):
+        self.p.start()
+        self.eng.now = 0.3
+        self.p.update(0.016)
+        self.p.pause()
+        self.eng.now = 5.0
+        self.p.update(0.016)
+        self.assertAlmostEqual(self.p.pos, 0.3)
+        self.p.resume()
+        self.eng.now = 5.1
+        self.p.update(0.016)
+        self.assertAlmostEqual(self.p.pos, 0.4)
+
+    def test_resume_while_playing_does_not_re_anchor(self):
+        self.p.start()
+        self.eng.now = 0.3
+        self.p.resume()  # freeplay calls this on every active frame
+        self.p.update(0.016)
+        self.assertAlmostEqual(self.p.pos, 0.3)
+
+    def test_a_direct_position_write_re_anchors(self):
+        self.p.start()
+        self.eng.now = 4.0
+        self.p.pos = -2.0  # the rhythm screen positions the melody after start()
+        self.eng.now = 6.0
+        self.p.update(0.0)
+        self.assertAlmostEqual(self.p.pos, 0.0)
+
+    def test_sync_maps_the_chart_clock_onto_the_melody(self):
+        self.p.start()
+        self.eng.now = 9.0
+        self.p.sync(1.0, lead_in=2.0)
+        self.assertAlmostEqual(self.p.pos, -1.0)
+        self.eng.now = 9.25
+        self.p.update(0.0)
+        self.assertAlmostEqual(self.p.pos, -0.75)
+
+
 if __name__ == "__main__":
     unittest.main()
