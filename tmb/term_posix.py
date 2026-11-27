@@ -380,6 +380,36 @@ class PosixBackend:
         except Exception:
             pass
 
+    def enter_alt_screen(self) -> None:
+        """Push the kitty flags again after switching to the alternate screen.
+
+        The protocol requires terminals to keep independent keyboard-mode
+        stacks for the main and alternate screens.  setup() negotiates on the
+        main screen, so without this second push the alternate screen starts
+        with flags 0: the query says releases are supported, but no release
+        events ever arrive while the TUI is running (keys then look stuck
+        until the freeplay watchdog expires).
+        """
+        if not self._kitty:
+            return
+        try:
+            sys.stdout.buffer.write(b"\x1b[>3u")
+            sys.stdout.buffer.flush()
+            self._diag("kitty: flags pushed on the alternate screen")
+        except Exception:
+            pass
+
+    def leave_alt_screen(self) -> None:
+        """Pop the alternate screen's flags before switching back to main."""
+        if not self._kitty:
+            return
+        try:
+            sys.stdout.buffer.write(b"\x1b[<u")
+            sys.stdout.buffer.flush()
+            self._diag("kitty: alternate-screen flags popped")
+        except Exception:
+            pass
+
     def teardown(self) -> None:
         self._diag("teardown: begin (kitty=%r)" % self._kitty)
         if self._kitty:

@@ -8,6 +8,7 @@ from unittest import mock
 
 from tmb.events import KeyEvent
 from tmb.terminal import Terminal, make_backend
+from tmb.term_posix import PosixBackend
 
 
 class FakeBackend:
@@ -17,12 +18,26 @@ class FakeBackend:
         self.events = []
         self.setup_calls = 0
         self.teardown_calls = 0
+        self.enter_alt_calls = 0
+        self.leave_alt_calls = 0
+        self.on_enter = None
+        self.on_leave = None
 
     def setup(self):
         self.setup_calls += 1
 
     def teardown(self):
         self.teardown_calls += 1
+
+    def enter_alt_screen(self):
+        self.enter_alt_calls += 1
+        if self.on_enter:
+            self.on_enter()
+
+    def leave_alt_screen(self):
+        self.leave_alt_calls += 1
+        if self.on_leave:
+            self.on_leave()
 
     def size(self):
         return 40, 12
@@ -118,6 +133,54 @@ class Facade(unittest.TestCase):
         self.assertIn("\x1b[?25l", out)  # the rest of setup still runs
         self.term.teardown()
         self.assertNotIn("\x1b[?1049l", self.text())
+        self.assertEqual(self.backend.enter_alt_calls, 0)
+        self.assertEqual(self.backend.leave_alt_calls, 0)
+
+    def test_keyboard_flags_are_pushed_after_the_alt_screen_switch(self):
+        # kitty keeps separate keyboard-mode stacks per screen: the flags
+        # pushed during setup belong to the main screen, so the alt screen
+        # needs its own push or releases are never reported.
+        self.backend.on_enter = lambda: self.out.buffer.write(b"<ENTER>")
+        self.term.setup()
+        out = self.out.buffer.getvalue()
+        self.assertEqual(self.backend.enter_alt_calls, 1)
+        self.assertLess(out.index(b"\x1b[?1049h"), out.index(b"<ENTER>"))
+
+    def test_alt_flags_are_popped_before_leaving_the_alt_screen(self):
+        self.term.setup()
+        self.backend.on_leave = lambda: self.out.buffer.write(b"<LEAVE>")
+        self.term.teardown()
+        out = self.out.buffer.getvalue()
+        self.assertEqual(self.backend.leave_alt_calls, 1)
+        self.assertLess(out.index(b"<LEAVE>"), out.index(b"\x1b[?1049l"))
+
+
+class KittyAltScreen(unittest.TestCase):
+    @staticmethod
+    def backend(kitty):
+        b = object.__new__(PosixBackend)
+        b._kitty = kitty
+        b._diag_log = None
+        return b
+
+    def test_enter_pushes_flags_on_the_current_screen(self):
+        out = FakeStdout()
+        with mock.patch("tmb.term_posix.sys.stdout", out):
+            self.backend(True).enter_alt_screen()
+        self.assertEqual(out.buffer.getvalue(), b"\x1b[>3u")
+
+    def test_leave_pops_flags_on_the_current_screen(self):
+        out = FakeStdout()
+        with mock.patch("tmb.term_posix.sys.stdout", out):
+            self.backend(True).leave_alt_screen()
+        self.assertEqual(out.buffer.getvalue(), b"\x1b[<u")
+
+    def test_without_kitty_nothing_is_sent(self):
+        out = FakeStdout()
+        with mock.patch("tmb.term_posix.sys.stdout", out):
+            self.backend(False).enter_alt_screen()
+            self.backend(False).leave_alt_screen()
+        self.assertEqual(out.buffer.getvalue(), b"")
 
 
 class Dispatch(unittest.TestCase):

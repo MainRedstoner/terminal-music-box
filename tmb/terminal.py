@@ -56,6 +56,12 @@ class Terminal:
         self._alt = bool(getattr(self.backend, "use_alt_screen", True))
         if self._alt:
             self.write("\x1b[?1049h")   # alternate screen buffer
+            # Flush the switch first: the keyboard flags must be pushed on the
+            # alternate screen's stack, not the main one (see term_posix).
+            self.flush()
+            enter = getattr(self.backend, "enter_alt_screen", None)
+            if enter is not None:
+                enter()
         self.write("\x1b[?25l")     # hide cursor
         self.write(_MOUSE_ON)
         self.write("\x1b[2J\x1b[H")
@@ -66,12 +72,17 @@ class Terminal:
         try:
             self.write(_MOUSE_OFF)
             self.write("\x1b[?25h")   # show cursor
-            if self._alt:
-                self.write("\x1b[?1049l")  # leave alternate screen
             self.write("\x1b[0m")
-            _diag("term.teardown: sequences buffered")
             self.flush()
-            _diag("term.teardown: flushed")
+            if self._alt:
+                # Pop the alternate screen's keyboard flags before leaving it;
+                # the main screen's flags are popped by backend.teardown().
+                leave = getattr(self.backend, "leave_alt_screen", None)
+                if leave is not None:
+                    leave()
+                self.write("\x1b[?1049l")  # leave alternate screen
+                self.flush()
+            _diag("term.teardown: sequences flushed")
         finally:
             _diag("term.teardown: calling backend")
             self.backend.teardown()
