@@ -11,12 +11,12 @@
 
 **只有用户明确说了才合并进 main**（「合了吧」「merge it」）。测试全绿、功能完成、别的 agent
 说好了，都不算授权。合并前跑 `python -m unittest discover -s tests`，并确认主检出
-（`git worktree list` 第一行）是干净的 `## main`。合并动作在主检出执行：
+（`git worktree list` 第一行）是干净的 `## main`。合并动作在主检出执行，按分支上的提交数决定：
 
-- **一版**（`main..HEAD` 一条直线，只有一套实现）→
+- **只有 1 个提交**（`git rev-list --count main..HEAD` 输出 1）→
   `git -C "D:/Projects/terminal-music-box" merge --ff-only <branch>`。
   快进失败说明 main 前进过：回分支上 `git merge main` 解决后再试，**不许**改用 `--no-ff` 硬合。
-- **多版**（合并过别的特性分支，或同一件事试过几套做法）→ 不许快进，用
+- **多个提交** → 不能快进，必须造一个最终版合并提交：
   `git -C "D:/Projects/terminal-music-box" merge --no-ff <branch> -m "Merge branch '<branch>' (final)" -m "最终采用哪版、放弃什么、为什么"`。
 
 合并后重跑测试；不顺手 push，不删分支和工作树。别人的分支、工作树一概不动。
