@@ -206,9 +206,19 @@ class FreePlayScreen(Screen):
         # sustained ones can be assembled up to 4x.
         return LEN_RANGE[1] if synth.get_timbre(tid).sustain else 1.0
 
+    def _active_timbre(self) -> str:
+        """The timbre that actually sounds right now.
+
+        While prenatal mode runs this is the player's timbre — the song's
+        locked one, or the user's pick after ^X. The sound strip must edit
+        and display that same timbre, not the free-play one sitting in the
+        config while the melody plays something else.
+        """
+        return self.player.timbre if self.player is not None else self.config.timbre
+
     def _adjust(self, sign: int) -> None:
         """Step the focused sound value of the current timbre."""
-        tid = self.config.timbre
+        tid = self._active_timbre()
         vol, ln = self.config.sound_params(tid)
         if self.focus == 0:
             self.config.set_sound(tid, vol=vol + sign * VOL_STEP, ln=ln)
@@ -235,9 +245,15 @@ class FreePlayScreen(Screen):
         # config value falls back to the first of them.
         if sid not in songs.RHYTHM_ORDER:
             sid = songs.RHYTHM_ORDER[0]
-        vol, length = self.config.sound_params(self.config.timbre)
-        self.player = songs.SongPlayer(self.audio, songs.get_song(sid),
-                                       self.config.timbre, vol=vol, length=length)
+        song = songs.get_song(sid)
+        # The rhythm game locks each song's timbre (Canon's didgeridoo, the
+        # piano pieces' electric piano) and so does prenatal auto-play: the
+        # same score must sound the same. The user's own timbre applies when
+        # the song is not charted; ^X overrides it until the song changes.
+        tid = song.timbre or self.config.timbre
+        vol, length = self.config.sound_params(tid)
+        self.player = songs.SongPlayer(self.audio, song, tid,
+                                       vol=vol, length=length)
         # Enabling prenatal (or changing its song) must not start the melody
         # on its own: stay silent until the user presses a play key. _silent
         # outranks the fresh activity timestamp _begin_playback sets below.
@@ -372,7 +388,7 @@ class FreePlayScreen(Screen):
 
     def _header_lines(self) -> List[Tuple[str, int, bool]]:
         th = self.theme
-        tid = self.config.timbre
+        tid = self._active_timbre()
         lines = [
             (th.t("freeplay.title"), C.yellow, True),
             (th.t("freeplay.timbre_line", name=synth.timbre_name(tid, th.lang)), C.cyan, False),
@@ -484,7 +500,7 @@ class FreePlayScreen(Screen):
         w, h = scr.w, scr.h
         if not (0 <= y < h) or w < 30:
             return
-        tid = self.config.timbre
+        tid = self._active_timbre()
         vol, ln = self.config.sound_params(tid)
         uni = th.is_unicode
         on, off = ("█", "░") if uni else ("#", "-")
