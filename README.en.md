@@ -300,7 +300,8 @@ card required.
 - Run `python3 main.py` directly; works over SSH too (mouse needs SGR support in
   your terminal).
 - No sound? Check `aplay -l` for an output device; on PipeWire desktops both
-  `aplay` and `paplay` work.
+  `aplay` and `paplay` work. Installing `pulseaudio-utils` alone does not start
+  a server -- check `pactl info` first; otherwise TMB falls back to ALSA.
 
 ## License
 

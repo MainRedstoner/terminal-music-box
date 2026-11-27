@@ -251,6 +251,8 @@ python -m unittest discover -s tests -v
 - 安装:`sudo apt install python3 alsa-utils`(或 `pulseaudio-utils`)。
 - 直接 `python3 main.py` 即可;SSH 会话中同样可用(鼠标需终端支持 SGR)。
 - 无声时检查 `aplay -l` 是否有输出设备;PipeWire 桌面环境下 `aplay`/`paplay` 均可。
+  只装 `pulseaudio-utils` 不会启动服务:先用 `pactl info` 确认能连上
+  PipeWire/PulseAudio,否则程序会改用 ALSA。
 
 ## 许可说明
 

@@ -81,6 +81,19 @@ class _ProcBackend(Backend):
         self.proc = subprocess.Popen(self.argv, stdin=subprocess.PIPE,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                      bufsize=0)
+        # A player that cannot reach its server or open its device exits at
+        # once; raise now so the engine can fall back instead of feeding a
+        # dead pipe (the exact "everything looks fine but nothing is audible"
+        # failure mode).
+        time.sleep(0.05)
+        code = self.proc.poll()
+        if code is not None:
+            try:
+                self.proc.stdin.close()
+            except Exception:
+                pass
+            self.proc = None
+            raise OSError("%s exited with status %s" % (self.argv[0], code))
 
     def write(self, pcm):
         if self.proc is None or self.proc.stdin is None:
@@ -253,6 +266,24 @@ def _warn_silent(msg: str) -> None:
     sys.stderr.write("tmb: %s\n" % msg)
 
 
+def _pulse_available() -> bool:
+    """True when a PulseAudio/PipeWire server is actually accepting clients.
+
+    paplay/pacat are only clients.  On a bare tty (or after a desktop session
+    died) pulseaudio-utils can be installed while no server is running; picking
+    PulseBackend then hands the mixer a pipe whose player exits immediately and
+    every write is dropped -- silent playback with no error.  Ask the server.
+    """
+    pactl = shutil.which("pactl")
+    if not pactl:
+        return False
+    try:
+        return subprocess.run([pactl, "info"], stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL, timeout=3).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def open_backend(prefer: Optional[str] = None, sr: int = 44100, ch: int = 1,
                  wav_path: Optional[str] = None) -> Backend:
     """Pick the best available backend for this platform."""
@@ -262,9 +293,17 @@ def open_backend(prefer: Optional[str] = None, sr: int = 44100, ch: int = 1,
         return WavBackend(wav_path or "output.wav")
     if prefer == "winmm" and os.name == "nt":
         return WinmmBackend()
-    if prefer == "alsa" and shutil.which("aplay"):
-        return AlsaBackend(sr, ch)
-    if prefer == "pulse" and shutil.which("paplay"):
+    if prefer == "alsa":
+        if shutil.which("aplay"):
+            return AlsaBackend(sr, ch)
+        _warn_silent("aplay is missing; install alsa-utils or use --audio auto.")
+        return NullBackend()
+    if prefer == "pulse":
+        if not shutil.which("paplay"):
+            _warn_silent("paplay is missing; install pulseaudio-utils or use --audio auto.")
+            return NullBackend()
+        if not _pulse_available():
+            _warn_silent("PulseAudio server is not reachable; sound will be silent.")
         return PulseBackend(sr, ch)
     if os.name == "nt":
         try:
@@ -273,21 +312,29 @@ def open_backend(prefer: Optional[str] = None, sr: int = 44100, ch: int = 1,
             _warn_silent("winmm unavailable; running silent.")
             return NullBackend()
     # WSL2 has no ALSA device; WSLg exposes PulseAudio at /mnt/wslg/PulseServer.
-    if os.path.isdir("/mnt/wslg"):
+    wslg = os.path.isdir("/mnt/wslg")
+    if wslg:
         if not os.environ.get("PULSE_SERVER") and os.path.exists("/mnt/wslg/PulseServer"):
             os.environ["PULSE_SERVER"] = "unix:/mnt/wslg/PulseServer"
-        if shutil.which("paplay"):
-            return PulseBackend(sr, ch)
-        _warn_silent("WSLg detected but paplay is missing; "
-                     "install pulseaudio-utils for sound (sudo apt install pulseaudio-utils).")
-        return NullBackend()
+    # Prefer the session mixer when it actually answers: it shares the device
+    # with other apps and follows hotplug.  A bare tty with only the Pulse
+    # client tools installed has no server, so fall through to ALSA instead of
+    # handing the mixer a pipe that dies on the first write.
+    if shutil.which("paplay") and _pulse_available():
+        return PulseBackend(sr, ch)
     if shutil.which("aplay"):
         return AlsaBackend(sr, ch)
     if shutil.which("paplay"):
-        return PulseBackend(sr, ch)
+        _warn_silent("PulseAudio server is not reachable and aplay is missing; "
+                     "start PipeWire/PulseAudio or install alsa-utils for sound.")
+        return NullBackend()
     if shutil.which("afplay"):
         # macOS afplay cannot stream; fall back to null (audio disabled)
         _warn_silent("macOS afplay cannot stream; running silent.")
+        return NullBackend()
+    if wslg:
+        _warn_silent("WSLg detected but paplay is missing; "
+                     "install pulseaudio-utils for sound (sudo apt install pulseaudio-utils).")
         return NullBackend()
     _warn_silent("no audio backend found; running silent. "
                  "Install alsa-utils (aplay) or pulseaudio-utils (paplay).")
