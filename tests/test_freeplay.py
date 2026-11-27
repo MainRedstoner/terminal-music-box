@@ -515,6 +515,22 @@ class PrenatalPreload(HeadlessCase):
                 # ...and the keyboard stays warm from the same request.
                 self.assertLessEqual(set(PRELOAD_MIDIS), set(midis))
 
+    def test_the_gate_covers_the_whole_request_not_just_the_song(self):
+        self.cfg.prenatal_song = "canon"
+        self.press("ctrl+t")
+        tid, midis = self.requested()
+        # Prenatal locks the song's timbre, like the rhythm game does.
+        self.assertEqual(tid, songs.SONGS["canon"].timbre or self.cfg.timbre)
+        # The request holds the whole score and the keyboard keys after it.
+        self.assertLessEqual(set(songs.SONGS["canon"].pitches), set(midis))
+        self.assertLessEqual(set(PRELOAD_MIDIS), set(midis))
+        # ...and the gate inspects that same set, not only the song's pitches
+        # (Canon never plays D3 or E3, so it cannot warm those keys itself).
+        checked = set()
+        for call in self.engine.is_preloaded.call_args_list:
+            checked.update(call[0][1])
+        self.assertLessEqual(set(PRELOAD_MIDIS), checked)
+
     def test_a_stale_selection_preloads_the_fallback_song(self):
         self.cfg.prenatal_song = "twinkle"  # a retired id still in old configs
         self.press("ctrl+t")
@@ -765,6 +781,58 @@ class FreePlayAscii(HeadlessCase):
         self.press("enter")
         self.assertEqual(self.cfg.timbre, "bit")
         self.assertIn("Bit", self.frame)
+
+
+class FreePlayColdKey(HeadlessCase):
+    """A cold key must not render inline in the UI thread."""
+
+    start_screen = "freeplay"
+
+    def setUp(self):
+        super().setUp()
+        self.engine.realtime = True
+        self.engine.is_preloaded = mock.Mock(return_value=False)
+        self.engine.preload = mock.Mock()
+        self.engine.preload_status = mock.Mock(return_value=(False, 0, 0))
+        self.engine.play_note = mock.Mock()
+        self.engine.note_on = mock.Mock()
+
+    def voiced(self) -> int:
+        return self.engine.play_note.call_count + self.engine.note_on.call_count
+
+    def test_a_cold_key_requests_its_buffer_and_skips_the_note(self):
+        self.press("q")
+        self.assertEqual(self.voiced(), 0)
+        tid, midis = self.engine.preload.call_args[0]
+        self.assertEqual(tid, self.cfg.timbre)
+        self.assertIn(KEY_MIDI["q"], list(midis))
+
+    def test_a_cold_key_rearms_the_whole_keyboard(self):
+        # A single-key request would supersede enter()'s 21-key batch and the
+        # other keys would stay cold for the rest of the session.
+        self.press("q")
+        self.assertEqual(self.voiced(), 0)
+        self.engine.preload.assert_called_once_with(self.cfg.timbre,
+                                                    PRELOAD_MIDIS)
+
+    def test_a_cold_key_does_not_supersede_a_running_request(self):
+        self.engine.preload_status.return_value = (True, 0, 21)
+        self.press("q")
+        self.engine.preload.assert_not_called()
+        self.assertEqual(self.voiced(), 0)
+
+    def test_a_warm_key_plays(self):
+        self.engine.is_preloaded.return_value = True
+        self.press("q")
+        # Harp is a holdable ringing timbre, so a warm press starts a voice
+        # through note_on; play_note is the fixed-length path. Either is fine,
+        # exactly one must fire (the point is that the press is not dropped).
+        self.assertEqual(self.voiced(), 1)
+
+    def test_entering_freeplay_rearms_the_keyboard_preload(self):
+        self.engine.preload.reset_mock()
+        self.app.navigate("freeplay")
+        self.engine.preload.assert_called_once_with(self.cfg.timbre, PRELOAD_MIDIS)
 
 
 if __name__ == "__main__":

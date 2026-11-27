@@ -479,13 +479,31 @@ def get_timbre(tid: str) -> Timbre:
     return TIMBRES.get(tid, TIMBRES["harp"])
 
 
-def render_note(args) -> NoteBuffers:
-    """Render one (timbre, midi) pair — the AudioEngine's process-pool worker.
+# Set once per pool worker by AudioEngine's pool initializer; None outside it.
+WORKER_GEN = None
+
+
+def set_worker_gen(value) -> None:
+    """Give this process the engine's shared preload generation."""
+    global WORKER_GEN
+    WORKER_GEN = value
+
+
+def render_note(args) -> Optional[NoteBuffers]:
+    """Render one (timbre, midi, gen) triplet — the AudioEngine's pool worker.
 
     Must stay module-level so multiprocessing can pickle it by reference, and
     this module is all the worker needs to import (pure math, no backends).
+
+    A queued pool task cannot be cancelled, so a superseded request would keep
+    every worker busy on keys nobody waits for (a rapid timbre cycle left
+    seconds of dead renders ahead of the next song). Comparing the generation
+    the task was queued with against the shared current one turns those stale
+    tasks into an immediate None instead.
     """
-    tid, midi = args
+    tid, midi, gen = args
+    if WORKER_GEN is not None and WORKER_GEN.value != gen:
+        return None
     return get_timbre(tid).render(midi)
 
 

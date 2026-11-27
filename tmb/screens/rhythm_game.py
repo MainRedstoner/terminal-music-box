@@ -16,6 +16,7 @@ GOOD_WIN = 0.120
 REPEAT_TIMEOUT = 0.18  # auto-repeat debounce (POSIX has no key-up events)
 APPROACH = 1.6
 COUNTDOWN = 3.0
+WAIT_TIMEOUT = 60.0  # a wedged preload must not hold the countdown forever
 RESULT_TAIL = 1.5
 EFFECT_TIME = 0.4
 LANE_FLASH = 0.15
@@ -40,13 +41,21 @@ class RhythmGameScreen(Screen):
         # choice stands. Preload the score's keys in the background so the
         # auto-play never stalls on a first-use render mid-song.
         self.timbre = self.song.timbre or self.config.timbre
-        self.audio.preload(self.timbre,
-                           sorted({n.midi for n in self.song.notes}))
+        self._score_midis = sorted({n.midi for n in self.song.notes})
+        self.audio.preload(self.timbre, self._score_midis)
         vol, length = self.config.sound_params(self.timbre)
         self.player = songs.SongPlayer(self.audio, self.song, self.timbre,
                                        vol=vol, length=length)
         self.player.start()
         self.player.pos = -self.beatmap.lead_in
+        # The menu gates on this same set, but the cache can still lose keys
+        # between its check and this frame (another preload finishing, a stale
+        # store). Verify again and hold the countdown: a cold note would render
+        # inline in the UI thread mid-song.
+        if self.audio.realtime and not self.audio.is_preloaded(self.timbre,
+                                                               self._score_midis):
+            self._waiting = True
+            self._wait_started = self.clock
 
     def _enter_pack(self, pack) -> None:
         """An external pack: the decoded audio file IS the melody."""
@@ -90,6 +99,9 @@ class RhythmGameScreen(Screen):
         self.pause_index = 0
         self.grade = "D"
         self.state = "countdown"
+        self._waiting = False
+        self._wait_started = 0.0
+        self._score_midis: List[int] = []
 
     def exit(self) -> None:
         try:
@@ -232,6 +244,20 @@ class RhythmGameScreen(Screen):
             for k in list(self.key_down):
                 if self.key_down[k] and self.clock - self.last_press.get(k, 0.0) > REPEAT_TIMEOUT:
                     self.key_down[k] = False
+        if self._waiting:
+            if self.audio.is_preloaded(self.timbre, self._score_midis):
+                self._waiting = False
+            elif self.clock - self._wait_started > WAIT_TIMEOUT:
+                # A wedged preload must not block the song forever: play and
+                # take the stalls as they come (same policy as free play).
+                self._waiting = False
+            else:
+                # Healing: a request that failed or was superseded would
+                # otherwise keep the countdown frozen until the timeout.
+                # The engine cooldown bounds the retry rate.
+                if not self.audio.preload_status()[0]:
+                    self.audio.preload(self.timbre, self._score_midis)
+                return  # freeze the countdown; the loading popup shows progress
         if self.state == "countdown":
             self.countdown -= dt
             if self.countdown <= 0:
