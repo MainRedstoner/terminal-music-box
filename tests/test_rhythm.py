@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 from tmb import songs
+from tmb.ansi import C
 from tmb.config import Config
 
 try:
@@ -103,6 +104,92 @@ class RhythmMenu(HeadlessCase):
     def test_escape_returns_to_the_main_menu(self):
         self.press("esc")
         self.assertEqual(self.app.current_name, "menu")
+
+
+class RhythmMenuSearch(HeadlessCase):
+    start_screen = "rhythm_menu"
+
+    def test_slash_opens_search_and_a_chinese_query_filters(self):
+        s = self.screen
+        self.press("/")
+        self.assertTrue(s.searching)
+        self.assertEqual(s.focus, 0)  # search always targets the song list
+        self.press("卡")
+        self.press("农")
+        self.assertEqual(s.song_ids, ["canon"])
+        self.assertIn(songs.SONGS["canon"].title("zh"), self.frame)
+        self.assertNotIn(songs.SONGS["minuet_g"].title("zh"), self.frame)
+        self.press("enter")
+        self.assertEqual(self.app.current_name, "rhythm_game")
+        self.assertEqual(self.screen.song_id, "canon")
+
+    def test_search_matches_the_english_title_and_keeps_group_headers(self):
+        s = self.screen
+        self.press("/")
+        for ch in "elise":
+            self.press(ch)
+        self.assertEqual(s.song_ids, ["fur_elise"])
+        # the builtin header stays above the lone match; the empty external
+        # group (header + hint) is filtered away entirely
+        th = self.app.theme
+        self.assertIn(th.t("rhythm.builtin"), self.frame)
+        self.assertNotIn(th.t("rhythm.external"), self.frame)
+        self.press("esc")
+        self.assertFalse(s.searching)
+        self.assertEqual(s.song_ids,
+                         ["canon", "minuet_g", "turkish_march", "fur_elise"])
+
+    def test_search_finds_an_external_pack_by_its_chinese_title(self):
+        try:
+            from tests.test_external import build_pack
+        except ImportError:
+            from test_external import build_pack
+        build_pack(self.external_dir, name="star.tmbp", sid="star_light",
+                   manifest={"title_zh": "星光", "title_en": "Starlight"})
+        self.app.navigate("menu")  # re-enter so the menu rescans the packs
+        self.app.navigate("rhythm_menu")
+        self.step()
+        s = self.screen
+        self.assertEqual(s.song_total, 5)
+        self.press("/")
+        self.press("星")
+        self.assertEqual(s.song_ids, ["star_light"])
+        self.assertIn(self.app.theme.t("rhythm.external"), self.frame)
+
+    def test_no_match_shows_the_hint_and_enter_starts_nothing(self):
+        self.press("/")
+        for ch in "zzz":
+            self.press(ch)
+        self.assertEqual(self.screen.song_rows, [])
+        self.assertIn(self.app.theme.t("search.no_match"), self.frame)
+        self.press("enter")
+        self.assertEqual(self.app.current_name, "rhythm_menu")
+
+    def test_typing_ignores_focus_and_tab_keys(self):
+        s = self.screen
+        self.press("/")
+        self.press("tab")
+        self.press("left")
+        self.assertEqual(s.focus, 0)
+        self.assertTrue(s.searching)
+
+    def test_search_rows_show_both_language_titles(self):
+        self.press("/")
+        for ch in "elise":
+            self.press(ch)
+        self.assertIn("致爱丽丝", self.frame)
+        self.assertIn("Für Elise", self.frame)
+
+    def test_matched_characters_get_a_gold_chip(self):
+        self.press("/")
+        for ch in "elise":
+            self.press(ch)
+        x, y = self.find_label("Für Elise")
+        row = self.term.screen.cells[y]
+        # exactly the five "elise" characters are chipped; the Chinese title,
+        # which the query does not match, is not
+        gold = [cell for cell in row if cell[2] == C.gold]
+        self.assertEqual(len(gold), 5)
 
 
 class Calibration(HeadlessCase):

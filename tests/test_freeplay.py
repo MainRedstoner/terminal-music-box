@@ -16,6 +16,18 @@ except ImportError:
     from helpers import HeadlessCase, has_cjk
 
 
+def cycle_timbre(case):
+    """Old ^X cycling, one step at a time through the picker.
+
+    The picker opens preselected on the current timbre, so down+enter applies
+    the next one in synth.ORDER.
+    """
+    case.press("ctrl+x")
+    case.assertEqual(case.app.current_name, "timbre_select")
+    case.press("down")
+    case.press("enter")
+
+
 class FreePlay(HeadlessCase):
     start_screen = "freeplay"
 
@@ -165,17 +177,20 @@ class FreePlay(HeadlessCase):
         self.release("ctrl+x")
         self.assertEqual(self.engine.active(), 0)
 
-    def test_ctrl_x_cycles_timbre_and_persists(self):
-        self.assertEqual(self.cfg.timbre, "harp")
+    def test_ctrl_x_opens_the_searchable_timbre_picker(self):
         self.press("ctrl+x")
-        self.assertEqual(self.cfg.timbre, "bit")
-        self.press("ctrl+x")
-        self.assertEqual(self.cfg.timbre, "flute")
-        self.assertEqual(self.read_config()["timbre"], "flute")
-        self.assertIn(synth.timbre_name("flute", "zh"), self.frame)
-        for _ in range(11):
-            self.press("ctrl+x")
-        self.assertEqual(self.cfg.timbre, "harp")
+        self.assertEqual(self.app.current_name, "timbre_select")
+        s = self.screen
+        self.assertEqual(s.items,
+                         [synth.timbre_name(t, "zh") for t in synth.ORDER])
+        self.assertEqual(s.index, synth.ORDER.index("harp"))
+        # picking applies the timbre, persists it and returns to free play
+        self.press("down")
+        self.press("enter")
+        self.assertEqual(self.cfg.timbre, synth.ORDER[1])
+        self.assertEqual(self.read_config()["timbre"], synth.ORDER[1])
+        self.assertEqual(self.app.current_name, "freeplay")
+        self.assertIn(synth.timbre_name(synth.ORDER[1], "zh"), self.frame)
 
     def test_ctrl_t_starts_prenatal_with_default_song(self):
         self.press("ctrl+t")
@@ -216,8 +231,15 @@ class FreePlay(HeadlessCase):
 
     def test_ctrl_x_updates_the_player_timbre(self):
         self.press("ctrl+t")
-        self.press("ctrl+x")
-        self.assertEqual(self.screen.player.timbre, self.cfg.timbre)
+        p = self.screen.player
+        self.press("ctrl+x")  # the picker keeps the prenatal player alive
+        self.assertEqual(self.app.current_name, "timbre_select")
+        self.assertIs(self.app._screens["freeplay"].player, p)
+        self.press("down")
+        self.press("enter")
+        self.assertEqual(self.app.current_name, "freeplay")
+        self.assertIs(self.screen.player, p)
+        self.assertEqual(p.timbre, self.cfg.timbre)
 
     def test_prenatal_pauses_after_the_activity_window(self):
         self.press("ctrl+t")
@@ -379,9 +401,13 @@ class FreePlay(HeadlessCase):
         self.assertEqual([loop for _, loop in voice._segments], [False])
         self.assertEqual(self.engine.active(), 1)
 
-    def test_mouse_click_on_timbre_button(self):
+    def test_mouse_click_on_timbre_button_opens_the_picker(self):
         self.click_label(self.app.theme.t("freeplay.btn_timbre"))
+        self.assertEqual(self.app.current_name, "timbre_select")
+        self.press("down")
+        self.press("enter")
         self.assertEqual(self.cfg.timbre, "bit")
+        self.assertEqual(self.read_config()["timbre"], "bit")
 
     def test_mouse_click_on_prenatal_button_toggles(self):
         th = self.app.theme
@@ -490,7 +516,7 @@ class PrenatalPreload(HeadlessCase):
         self.engine.preload.reset_mock()
         self.engine.is_preloaded.return_value = False
         self.engine.preload_status.return_value = (True, 0, 8)
-        self.press("ctrl+x")
+        cycle_timbre(self)
         self.assertEqual(p.timbre, self.cfg.timbre)
         self.assertEqual(p.timbre, "bit")
         self.assertTrue(self.screen._waiting)
@@ -654,8 +680,8 @@ class SoundStrip(HeadlessCase):
         self.press("left")  # harp (ringing) can only be trimmed
         self.assertEqual(self.cfg.sound_params("harp"), (1.0, 0.75))
         self.assertEqual(self.read_config()["sound"]["harp"]["len"], 0.75)
-        self.press("ctrl+x")
-        self.press("ctrl+x")  # harp -> bit -> flute (sustained)
+        cycle_timbre(self)  # harp -> bit -> flute (sustained), via the picker
+        cycle_timbre(self)
         self.press("right")
         self.assertEqual(self.cfg.sound_params("flute"), (1.0, 1.25))
 
@@ -681,7 +707,7 @@ class SoundStrip(HeadlessCase):
     def test_adjusted_settings_follow_a_timbre_switch(self):
         self.press("right")
         self.assertEqual(self.cfg.sound_params("harp"), (1.1, 1.0))
-        self.press("ctrl+x")  # -> bit, with its 0.25x default
+        cycle_timbre(self)  # -> bit, with its 0.25x default
         self.assertEqual(self.cfg.sound_params("bit"), (1.0, 0.25))
         self.assertIn("0.25×", self.frame)
 
@@ -712,6 +738,9 @@ class FreePlayAscii(HeadlessCase):
 
     def test_ascii_timbre_button_click(self):
         self.click_label(self.app.theme.t("freeplay.btn_timbre"))
+        self.assertEqual(self.app.current_name, "timbre_select")
+        self.press("down")
+        self.press("enter")
         self.assertEqual(self.cfg.timbre, "bit")
         self.assertIn("Bit", self.frame)
 

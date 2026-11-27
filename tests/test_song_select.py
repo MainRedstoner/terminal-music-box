@@ -4,6 +4,7 @@ from __future__ import annotations
 import unittest
 
 from tmb import songs
+from tmb.ansi import C
 
 try:
     from tests.helpers import HeadlessCase
@@ -92,9 +93,104 @@ class SongSelect(HeadlessCase):
         self.open(title="自定义标题")
         self.assertIn("自定义标题", self.frame)
 
-    def test_footer_shows_the_exit_hint(self):
+    def test_footer_shows_the_search_and_navigation_hint(self):
         self.open()
-        self.assertIn(self.app.theme.t("freeplay.exit_hint"), self.frame)
+        self.assertIn(self.app.theme.t("list.hint"), self.frame)
+
+    def test_slash_opens_the_search_and_a_chinese_query_filters(self):
+        seen = []
+        s = self.open(on_select=seen.append, back="menu")
+        self.press("/")
+        self.assertTrue(s.searching)
+        self.press("卡")
+        self.press("农")
+        self.assertEqual(s.visible, [0])
+        self.press("enter")
+        self.assertEqual(seen, ["canon"])
+        self.assertEqual(self.app.current_name, "menu")
+
+    def test_search_matches_the_english_title_in_chinese_mode(self):
+        seen = []
+        self.open(on_select=seen.append, back="menu")
+        self.press("/")
+        for ch in "elise":
+            self.press(ch)
+        self.assertEqual(self.screen.visible,
+                         [songs.RHYTHM_ORDER.index("fur_elise")])
+        self.press("enter")
+        self.assertEqual(seen, ["fur_elise"])
+
+    def test_search_matches_by_id(self):
+        self.open()
+        self.press("/")
+        for ch in "turkish":
+            self.press(ch)
+        self.assertEqual(self.screen.visible,
+                         [songs.RHYTHM_ORDER.index("turkish_march")])
+
+    def test_space_types_into_the_query(self):
+        self.open()
+        self.press("/")
+        for ch in "in":
+            self.press(ch)
+        self.press("space")
+        self.press("g")
+        self.assertEqual(self.screen.visible,
+                         [songs.RHYTHM_ORDER.index("minuet_g")])
+
+    def test_backspace_edits_and_no_match_shows_the_hint(self):
+        self.open()
+        self.press("/")
+        for ch in "canonx":
+            self.press(ch)
+        self.assertEqual(self.screen.visible, [])
+        self.assertIn(self.app.theme.t("search.no_match"), self.frame)
+        self.press("backspace")
+        self.assertEqual(self.screen.visible, [0])
+
+    def test_esc_cancels_the_search_then_a_second_esc_leaves(self):
+        s = self.open()
+        self.press("/")
+        self.press("卡")
+        self.assertEqual(s.visible, [0])
+        self.press("esc")
+        self.assertFalse(s.searching)
+        self.assertEqual(s.query, "")
+        self.assertEqual(s.visible, list(range(len(songs.RHYTHM_ORDER))))
+        self.assertEqual(self.app.current_name, "song_select")
+        self.press("esc")
+        self.assertEqual(self.app.current_name, "freeplay")
+
+    def test_search_state_resets_on_reenter(self):
+        self.open()
+        self.press("/")
+        self.press("卡")
+        self.press("esc")  # leave while the search is still open
+        s = self.open()
+        self.assertFalse(s.searching)
+        self.assertEqual(s.query, "")
+        self.assertEqual(s.visible, list(range(len(songs.RHYTHM_ORDER))))
+
+    def test_search_rows_show_both_language_names(self):
+        self.open()
+        self.press("/")
+        for ch in "elise":
+            self.press(ch)
+        # the row carries the full Chinese and English title side by side
+        self.assertIn("致爱丽丝", self.frame)
+        self.assertIn("Für Elise", self.frame)
+
+    def test_matched_characters_get_a_gold_chip(self):
+        self.open()
+        self.press("/")
+        for ch in "elise":
+            self.press(ch)
+        x, y = self.find_label("Für Elise")
+        row = self.term.screen.cells[y]
+        # exactly the five "elise" characters are chipped; the Chinese name,
+        # which the query does not match, is not
+        gold = [cell for cell in row if cell[2] == C.gold]
+        self.assertEqual(len(gold), 5)
 
 
 class SongSelectAscii(HeadlessCase):
