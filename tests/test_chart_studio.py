@@ -1,10 +1,11 @@
-"""Static contract checks for the single-file chart studio page.
+"""Static contract checks for the single-file chart/align/pack studio page.
 
 The studio is plain HTML + one inline script, so there is no import graph to
 check. A missing element used to abort the whole script at load time (the
 canvas never drew), so these tests pin the DOM/script contract: every element
 the script looks up by id, every label target and every dialog close button
-must exist, ids must be unique, and the page must stay dependency-free.
+must exist, ids must be unique, the page must stay dependency-free, and the
+chart -> align -> pack pipeline must live entirely in that one file.
 """
 from __future__ import annotations
 
@@ -51,8 +52,36 @@ class ChartStudioPageTest(unittest.TestCase):
             "view", "overview", "audioFile", "importFile", "audioMeta",
             "metaDlg", "metaId", "metaSummary", "helpDlg", "calibDlg",
             "btnExportChart", "btnExportManifest", "btnPlay", "toast",
+            # alignment
+            "snapSelect", "phaseMs", "phaseRange", "btnAutoPhase",
+            "btnPhaseZero", "btnQuantize", "offsetMs", "offsetRange",
+            "strength", "strengthVal", "btnShift", "statCurrent",
+            "statPreview", "statBands", "statMerge", "quantHint",
+            "gridHint", "dirtyChip",
+            # packing
+            "btnBuildPack", "btnOpenPack", "packFile", "packAudioPlan",
+            "packOutName", "packProgress", "packProgressBar",
         ):
             self.assertIn(f'id="{element_id}"', self.html)
+
+    def test_alignment_pipeline_exists(self) -> None:
+        for name in ("gridSnap", "targetFor", "autoPhase", "applyQuantize",
+                     "applyShift", "updateAlignStats"):
+            self.assertIn(name, self.html)
+
+    def test_pack_pipeline_exists(self) -> None:
+        # The browser is the whole toolchain now: zip writer, Opus/Ogg muxer,
+        # WAV fallback and the .tmbp reader all live in this file.
+        for name in ("zipStore", "oggMux", "encodeOpusOgg", "encodeWav",
+                     "buildPackBytes", "packManifest", "readZip",
+                     "loadPackFile", "inflateRaw"):
+            self.assertIn(name, self.html)
+
+    def test_no_command_line_toolchain_left(self) -> None:
+        # make_pack.py / chart_canon_style.py / align_studio.html were removed
+        # when the page absorbed them; stale references would mislead readers.
+        for gone in ("make_pack.py", "chart_canon_style", "align_studio"):
+            self.assertNotIn(gone, self.html)
 
     def test_stays_zero_dependency(self) -> None:
         self.assertEqual(self.html.count("<script>"), 1)

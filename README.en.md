@@ -192,63 +192,49 @@ copyrighted material and must not enter version control.
   the existing mixer as one long voice; pause/resume line up exactly, and on
   slow devices the audio re-aligns once it drifts more than 80 ms from the
   song clock. Packs whose audio is a plain PCM WAV play without ffmpeg.
-- **Packing**: `tools/make_pack.py` compresses the audio with ffmpeg to mono
-  Opus 96 kbps while building the pack (falling back to the built-in AAC
-  encoder when libopus is unavailable) — 6.3 MB of source audio becomes a
-  2.9 MB pack, which also cuts decode memory on a 1 GB Raspberry Pi.
 
-  ```bash
-  python tools/make_pack.py --src packs/my_song --audio audio.m4s
-  ```
+Charting, aligning and packing all happen in one web page — no command-line
+tools are involved.
 
-- **Charting**: `tools/chart_canon_style.py` detects onsets from the melody
-  band (250-1200 Hz: voice + piano) — drums and bass are excluded, so the
-  chart follows the tune, not the drum pulse. Notes keep their performed
-  onset times (this concert recording breathes; no global quantise grid),
-  and the lanes are planned with the same two-hand toolbox the built-in
-  charts use (`tmb/charts.py`): pitch bands cut by note count, dense runs
-  cycling the four inner lanes (`S D J K`), no repeated key on consecutive
-  onsets, one-hand blocks crossed to the other hand, and phrase accents as
-  mirrored double taps (A-L / S-K / D-J):
+### Chart Studio: chart / align / pack
 
-  ```bash
-  python tools/chart_canon_style.py --audio audio.m4s \
-      --id i_never_forgot --title-zh 我不曾忘记 --title-en "To the Traveler" \
-      --out-dir packs/i_never_forgot
-  python tools/make_pack.py --src packs/i_never_forgot --audio audio.m4s
-  ```
+Open **`tools/chart_studio.html`** — a zero-dependency, single-file web tool
+(Chrome/Edge recommended). Audio plays through WebAudio on the browser's audio
+thread, so page jank never affects the transport. The layout is a canvas plus a
+song/selection/grid sidebar and a transport dock: the overview strip scrubs,
+while the beat grid, waveform, per-lane note counts, BPM and alignment stats
+stay in view.
 
-`packs/` keeps chart sources (`chart.json` + `manifest.json`, no audio) in
-version control; the audio is merged in when building the `.tmbp`.
-
-### Manual Chart Studio
-
-For hands-on charting, open **`tools/chart_studio.html`** — a zero-dependency,
-single-file web tool (Chrome/Edge recommended). Audio plays through WebAudio
-on the browser's audio thread, so page jank never affects the transport. The
-layout is a canvas plus a song/selection sidebar and a transport dock: the
-overview strip scrubs, while the beat grid, waveform, per-lane note counts and
-BPM stay in view.
-
-- **Loading** — pick a file in the top bar or drop audio onto the window; with
-  no material, *Demo* synthesises 60 seconds of music at 120 BPM.
+- **Loading** — pick a file in the top bar, or drop audio, a `chart.json` or a
+  `.tmbp` onto the window; with no material, *Demo* synthesises 60 seconds of
+  music at 120 BPM.
 - **Latency calibration** — 16 metronome clicks, median tap offset, compensating
   output latency + reaction time in one number; at reduced speed the reaction
   part scales with the rate. Notes placed while paused sit exactly on the
   playhead instead of being shifted by the reaction delay.
-- **Play mode** — the same `A S D J K L` six lanes as the game; tap while
-  listening, `Space` pauses/resumes, 0.25×–1× speed, metronome, key click and
-  snapping.
-- **Edit mode** (`Tab`) — piano roll + waveform + bar/beat grid: click to
-  select, drag to move in time and lane, `↑/↓` changes lane, `←/→` ±10 ms
-  (Shift ±50 ms), `Del` deletes, `Ctrl+Z` / `Ctrl+Shift+Z` undo/redo,
-  `Ctrl+wheel` zooms. A double tap is `L` on a selected note then click the
-  partner — both align to one timestamp and edit together (`U` unlinks).
-- **Song card** — metadata, BPM (press `T` to tap tempo) and per-lane note
-  density; `chart.json` / `manifest.json` export feed `make_pack.py --src`
-  directly, and existing charts can be imported for further editing.
+- **Play view** — the same `A S D J K L` six lanes as the game; tap while
+  listening, `Space` pauses/resumes, 0.25×–1× speed, metronome and key click.
+- **Timeline view** (`Tab`) — piano roll + waveform + grid: click to select,
+  drag to move in time and lane, `↑/↓` changes lane, `←/→` ±10 ms (Shift ±50 ms),
+  `Del` deletes, `Ctrl+Z` / `Ctrl+Shift+Z` undo/redo, `Ctrl+wheel` zooms. A
+  double tap is `L` on a selected note then click the partner — both align to
+  one timestamp and edit together (`U` unlinks).
+- **Grid / align** — the grid unit is an integer fraction of the BPM beat
+  (1, 1/2, 1/4, 1/8); phase slides the whole grid sideways and *Auto phase*
+  solves it from the circular mean of the note times; offset fixes a chart that
+  sits uniformly early/late, and strength (0–100%) controls how far notes move
+  toward the grid. The sidebar shows the current deviation (median/p90), the
+  preview movement, how many notes land within 10/20/30 ms, and how many time
+  points would merge. Yellow ticks are only a preview — *Quantise all* rewrites
+  the times (undoable, same-lane duplicates merged).
+- **Packing** — *Pack / Export* writes the `.tmbp` in one click: WebCodecs
+  encodes the audio to mono Opus 96 kbps inside Ogg (about 3 MB for 4 minutes);
+  without WebCodecs the source file is embedded verbatim, and a synthesized
+  demo falls back to 44.1 kHz mono WAV (which the engine plays without ffmpeg).
+  A finished pack reopens through *Music pack* in the top bar — the `.tmbp` is
+  the project file, so no separate chart-source directory is needed.
 - **Drafts** — autosaved in the browser per audio file, including metadata,
-  BPM, snapping and double-tap groups.
+  BPM, grid phase and double-tap groups.
 
 Bilibili `.m4s` segments cannot be decoded by browsers — remux first:
 `ffmpeg -i in.m4s -c:a copy out.m4a`.
@@ -275,9 +261,7 @@ tmb/
   external.py      external song packs (.tmbp): parsing, ffmpeg decode, PCM player
   screens/         main_menu, freeplay, rhythm, rhythm_game, song_select
 tools/
-  make_pack.py     pack builder: ffmpeg-compress audio, assemble a .tmbp
-  chart_canon_style.py  Canon-style auto charting (melody-band onsets + two-hand planning)
-  chart_studio.html     manual chart studio (standalone web page, zero dependencies)
+  chart_studio.html     chart / align / pack in one standalone web page (zero deps)
 ```
 
 ### Cross-platform input
