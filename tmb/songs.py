@@ -330,7 +330,7 @@ def first_song_id() -> str:
     return ORDER[0]
 
 
-# 小星星 / Twinkle Twinkle Little Star (public domain) — keep first: default prenatal song.
+# 小星星 / Twinkle Twinkle Little Star (public domain) — keep first: library default.
 _twinkle = seq([
     (60, 1), (60, 1), (67, 1), (67, 1), (69, 1), (69, 1), (67, 2),
     (65, 1), (65, 1), (64, 1), (64, 1), (62, 1), (62, 1), (60, 2),

@@ -133,7 +133,7 @@ class FreePlay(HeadlessCase):
         self.assertIsNotNone(p)
         self.assertTrue(p.playing)
         self.assertTrue(self.screen.prenatal)
-        self.assertEqual(p.song.id, songs.first_song_id())
+        self.assertEqual(p.song.id, songs.RHYTHM_ORDER[0])
         self.assertIn(p.song.title("zh"), self.frame)
         self.assertIn(self.app.theme.t("freeplay.prenatal_hint"), self.frame)
 
@@ -141,6 +141,11 @@ class FreePlay(HeadlessCase):
         self.cfg.prenatal_song = "canon"
         self.press("ctrl+t")
         self.assertEqual(self.screen.player.song.id, "canon")
+
+    def test_ctrl_t_with_a_song_outside_the_rhythm_list_falls_back(self):
+        self.cfg.prenatal_song = "twinkle"
+        self.press("ctrl+t")
+        self.assertEqual(self.screen.player.song.id, songs.RHYTHM_ORDER[0])
 
     def test_ctrl_t_toggles_off_and_silences(self):
         self.press("ctrl+t")
@@ -205,13 +210,18 @@ class FreePlay(HeadlessCase):
         duration = p.song.duration
         prev = 0.0
         wrapped = False
-        for i in range(int((duration + 3.0) / 0.05)):
-            self.step(0.05)
-            if i % 10 == 0:
-                self.term.key("q")
-            if p.pos < prev - 1.0:
-                wrapped = True
-            prev = p.pos
+        rf = self.app.render_frames
+        self.app.render_frames = False
+        try:
+            for i in range(int((duration + 3.0) / 0.05)):
+                self.step(0.05)
+                if i % 10 == 0:
+                    self.term.key("q")
+                if p.pos < prev - 1.0:
+                    wrapped = True
+                prev = p.pos
+        finally:
+            self.app.render_frames = rf
         self.assertTrue(wrapped)
         self.assertTrue(p.playing)
         self.assertLess(p.pos, duration)
@@ -227,9 +237,9 @@ class FreePlay(HeadlessCase):
         self.press("down")
         self.press("enter")
         self.assertEqual(self.app.current_name, "freeplay")
-        self.assertEqual(self.cfg.prenatal_song, "ode_joy")
-        self.assertEqual(self.read_config()["prenatal_song"], "ode_joy")
-        self.assertEqual(self.screen.player.song.id, "ode_joy")
+        self.assertEqual(self.cfg.prenatal_song, "turkish_march")
+        self.assertEqual(self.read_config()["prenatal_song"], "turkish_march")
+        self.assertEqual(self.screen.player.song.id, "turkish_march")
         self.assertTrue(self.screen.player.playing)
 
     def test_ctrl_a_without_a_player_only_stores_the_choice(self):
@@ -238,10 +248,10 @@ class FreePlay(HeadlessCase):
         self.press("down")
         self.press("enter")
         self.assertEqual(self.app.current_name, "freeplay")
-        self.assertEqual(self.cfg.prenatal_song, "mary_lamb")
+        self.assertEqual(self.cfg.prenatal_song, "minuet_g")
         self.assertIsNone(self.screen.player)
         self.press("ctrl+t")
-        self.assertEqual(self.screen.player.song.id, "mary_lamb")
+        self.assertEqual(self.screen.player.song.id, "minuet_g")
 
     def test_song_select_mouse_click_picks_a_song(self):
         self.press("ctrl+a")

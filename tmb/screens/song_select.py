@@ -14,7 +14,7 @@ class SongSelectScreen(ListScreen):
         self.back_target = back
         self.title = title or self.theme.t("song.select")
         lang = self.theme.lang
-        ids = list(songs.ORDER)
+        ids = list(songs.RHYTHM_ORDER)
         items = [songs.SONGS[s].title(lang) for s in ids]
         actions = [(lambda sid=s: self._pick(sid)) for s in ids]
         self.set_items(items, actions)
