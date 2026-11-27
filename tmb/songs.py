@@ -320,6 +320,8 @@ class SongPlayer:
 # Library --------------------------------------------------------------------
 SONGS: Dict[str, Song] = {}
 ORDER: List[str] = []
+# The library registers exactly these four charted songs; the list also fixes
+# the order the rhythm-game and prenatal pickers show.
 RHYTHM_ORDER: List[str] = ["canon", "minuet_g", "turkish_march",
                             "fur_elise"]
 
@@ -340,74 +342,6 @@ def get_song(sid: Optional[str]) -> Song:
 def first_song_id() -> str:
     return ORDER[0]
 
-
-# 小星星 / Twinkle Twinkle Little Star (public domain) — keep first: library default.
-_twinkle = seq([
-    (60, 1), (60, 1), (67, 1), (67, 1), (69, 1), (69, 1), (67, 2),
-    (65, 1), (65, 1), (64, 1), (64, 1), (62, 1), (62, 1), (60, 2),
-    (67, 1), (67, 1), (65, 1), (65, 1), (64, 1), (64, 1), (62, 2),
-    (67, 1), (67, 1), (65, 1), (65, 1), (64, 1), (64, 1), (62, 2),
-    (60, 1), (60, 1), (67, 1), (67, 1), (69, 1), (69, 1), (67, 2),
-    (65, 1), (65, 1), (64, 1), (64, 1), (62, 1), (62, 1), (60, 2),
-], bpm=100)
-register(Song("twinkle", "小星星", "Twinkle Twinkle", 100, _twinkle))
-
-# 玛丽有只小羊羔 / Mary Had a Little Lamb (traditional, public domain)
-register(Song("mary_lamb", "玛丽有只小羊羔", "Mary Had a Little Lamb", 100, seq([
-    (64, 1), (62, 1), (60, 1), (62, 1), (64, 1), (64, 1), (64, 2),
-    (62, 1), (62, 1), (62, 2), (64, 1), (67, 1), (67, 2),
-    (64, 1), (62, 1), (60, 1), (62, 1), (64, 1), (64, 1), (64, 1), (64, 1),
-    (62, 1), (62, 1), (64, 1), (62, 1), (60, 4),
-], bpm=100)))
-
-# 欢乐颂 / Ode to Joy (Beethoven, public domain) — the complete 4-phrase theme.
-register(Song("ode_joy", "欢乐颂", "Ode to Joy", 100, seq([
-    # Phrase 1
-    (64, 1), (64, 1), (65, 1), (67, 1), (67, 1), (65, 1), (64, 1), (62, 1),
-    (60, 1), (60, 1), (62, 1), (64, 1), (64, 1.5), (62, 0.5), (62, 2),
-    # Phrase 2
-    (64, 1), (64, 1), (65, 1), (67, 1), (67, 1), (65, 1), (64, 1), (62, 1),
-    (60, 1), (60, 1), (62, 1), (64, 1), (62, 1.5), (60, 0.5), (60, 2),
-    # Phrase 3 ("Deine Zauber binden wieder ...")
-    (62, 1), (62, 1), (64, 1), (60, 1),
-    (62, 0.5), (64, 0.5), (65, 1), (64, 0.5), (62, 0.5), (60, 1),
-    (62, 0.5), (64, 0.5), (65, 1), (64, 0.5), (62, 0.5), (60, 1),
-    (62, 0.5), (64, 0.5), (65, 1), (64, 0.5), (62, 0.5), (55, 1.5),
-    # Phrase 4 ("Alle Menschen werden Brüder ...")
-    (64, 1), (64, 1), (65, 1), (67, 1), (67, 1), (65, 1), (64, 1), (62, 1),
-    (60, 1), (60, 1), (62, 1), (64, 1), (62, 1.5), (60, 0.5), (60, 2),
-], bpm=100)))
-
-# 铃儿响叮当 / Jingle Bells (James Pierpont, public domain) — verse + chorus.
-register(Song("jingle_bells", "铃儿响叮当", "Jingle Bells", 120, seq([
-    # Verse
-    (67, 1), (64, 1), (62, 1), (60, 2),                              # Dashing through the snow
-    (67, 1), (67, 1), (67, 1), (67, 1), (64, 1), (62, 0.5), (60, 0.5), (69, 2),  # in a one-horse open sleigh
-    (69, 1), (65, 1), (64, 1), (62, 1), (71, 2),                     # O'er the fields we go
-    (67, 1), (67, 1), (65, 1), (62, 1), (64, 2),                     # laughing all the way
-    (67, 1), (64, 1), (62, 1), (60, 2),                              # Bells on bobtail ring
-    (67, 1), (67, 1), (64, 1), (62, 1), (60, 1), (69, 2),            # making spirits bright
-    (69, 1), (69, 1), (65, 1), (64, 1), (62, 1),                     # What fun it is to ride
-    (67, 1), (67, 1), (67, 1), (67, 1),                              # and sing a sleighing
-    (69, 1), (67, 1), (65, 1), (62, 1), (60, 4),                     # song tonight
-    # Chorus
-    (64, 1), (64, 1), (64, 2), (64, 1), (64, 1), (64, 2),
-    (64, 1), (67, 1), (60, 1), (62, 1), (64, 4),
-    (65, 1), (65, 1), (65, 1), (65, 1), (65, 1), (64, 1), (64, 1),
-    (64, 0.5), (64, 0.5), (64, 1), (62, 1), (62, 1), (64, 1), (62, 2), (67, 2),
-    (64, 1), (64, 1), (64, 2), (64, 1), (64, 1), (64, 2),
-    (64, 1), (67, 1), (60, 1), (62, 1), (64, 4),
-    (65, 1), (65, 1), (65, 1), (65, 1), (65, 1), (64, 1), (64, 1),
-    (64, 0.5), (64, 0.5), (67, 1), (67, 1), (65, 1), (62, 1), (60, 4),
-], bpm=120)))
-
-# 祝你生日快乐 / Happy Birthday (public domain since 2016)
-register(Song("happy_birthday", "祝你生日快乐", "Happy Birthday", 120, seq([
-    (67, 0.75), (67, 0.25), (69, 1), (67, 1), (72, 1), (71, 2),
-    (67, 0.75), (67, 0.25), (69, 1), (67, 1), (74, 1), (72, 2),
-    (67, 0.75), (67, 0.25), (79, 1), (76, 1), (72, 1), (71, 1), (69, 2),
-    (77, 0.75), (77, 0.25), (76, 1), (72, 1), (74, 1), (72, 2),
-], bpm=120)))
 
 # 卡农 / Canon in C — the complete Canon per 3 Violini e Basso, transposed
 # from D major. Source: Mutopia-2015/09/02-2047 (IMSLP), typeset by Michael
@@ -1805,31 +1739,6 @@ _fur_elise_chart_notes, _fur_elise_chart_lanes = _fur_elise_chart()
 register(Song("fur_elise", "致爱丽丝", "Für Elise", _FUR_ELISE_BPM,
               _fur_elise_notes, chart_notes=_fur_elise_chart_notes,
               chart_lanes=_fur_elise_chart_lanes, timbre="pling"))
-
-# 摇篮曲 / Brahms' Lullaby (Wiegenlied Op.49 No.4, public domain).
-# Melody verified note-by-note against the tuneonmusic beginner MIDI (C-major
-# transposition of the Eb original); rhythm taken from that MIDI.
-register(Song("brahms_lullaby", "摇篮曲", "Brahms' Lullaby", 90, seq([
-    (64, 0.5), (64, 0.5), (67, 2), (64, 0.5), (64, 0.5), (67, 2),
-    (64, 0.5), (67, 0.5), (72, 1), (71, 1.5), (69, 0.5), (69, 1), (67, 1),
-    (62, 0.5), (64, 0.5), (65, 1), (62, 1),
-    (62, 0.5), (64, 0.5), (65, 2), (62, 0.5), (65, 0.5), (71, 0.5), (69, 0.5), (67, 1),
-    (71, 1), (72, 2),
-    (60, 0.5), (60, 0.5), (72, 2), (69, 0.5), (65, 0.5), (67, 2),
-    (64, 0.5), (60, 0.5), (65, 1), (67, 1), (69, 1), (67, 2),
-    (60, 0.5), (60, 0.5), (72, 2), (69, 0.5), (65, 0.5), (67, 2),
-    (64, 0.5), (60, 0.5), (65, 1), (64, 1), (62, 1), (60, 2),
-], bpm=90)))
-
-# 伦敦桥 / London Bridge Is Falling Down (traditional, public domain).
-# Melody verified note-by-note against the tuneonmusic beginner MIDI and two
-# independent letter-note transcriptions; rhythm taken from that MIDI.
-register(Song("london_bridge", "伦敦桥", "London Bridge", 100, seq([
-    (67, 1.5), (69, 0.5), (67, 1), (65, 1), (64, 1), (65, 1), (67, 2),
-    (62, 1), (64, 1), (65, 2), (64, 1), (65, 1), (67, 2),
-    (67, 1.5), (69, 0.5), (67, 1), (65, 1), (64, 1), (65, 1), (67, 2),
-    (62, 2), (67, 2), (64, 1), (60, 3),
-], bpm=100)))
 
 # Build beatmaps only after every song is registered.
 BEATMAPS: Dict[str, Beatmap] = {}

@@ -132,8 +132,8 @@ later starts are immediate.
 
 ## Built-in songs
 
-Eleven public-domain melodies. Prenatal mode offers only the rhythm game's four
-songs; the rhythm game contains the complete Canon (with falling notes derived
+Four public-domain melodies, all offered by both the rhythm game and prenatal
+mode. The rhythm game contains the complete Canon (with falling notes derived
 from violin I),
 Minuet in G (AABB repeats, right-hand lead banded by note count, mirrored accents),
 Turkish March (right-hand theme on its eighth-note skeleton, complete rondo), and
@@ -142,17 +142,10 @@ double taps on chords and downbeats):
 
 | Song | Chinese |
 | --- | --- |
-| Twinkle Twinkle | 小星星 |
-| Mary Had a Little Lamb | 玛丽有只小羊羔 |
-| Ode to Joy | 欢乐颂 |
-| Jingle Bells | 铃儿响叮当 |
-| Happy Birthday | 祝你生日快乐 |
 | Canon in C | 卡农 |
 | Minuet in G | G 大调小步舞曲 |
 | Turkish March | 土耳其进行曲 |
 | Für Elise | 致爱丽丝 |
-| Brahms' Lullaby | 摇篮曲 |
-| London Bridge | 伦敦桥 |
 
 Canon uses the complete three-violin-and-bass score from
 [Mutopia-2015/09/02-2047](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=2047),

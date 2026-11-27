@@ -144,7 +144,7 @@ class FreePlay(HeadlessCase):
         self.assertEqual(self.screen.player.song.id, "canon")
 
     def test_ctrl_t_with_a_song_outside_the_rhythm_list_falls_back(self):
-        self.cfg.prenatal_song = "twinkle"
+        self.cfg.prenatal_song = "twinkle"  # a retired id still in old configs
         self.press("ctrl+t")
         self.assertEqual(self.screen.player.song.id, songs.RHYTHM_ORDER[0])
 
@@ -399,7 +399,7 @@ class PrenatalPreload(HeadlessCase):
                 self.assertLessEqual(set(PRELOAD_MIDIS), set(midis))
 
     def test_a_stale_selection_preloads_the_fallback_song(self):
-        self.cfg.prenatal_song = "twinkle"  # outside the prenatal list
+        self.cfg.prenatal_song = "twinkle"  # a retired id still in old configs
         self.press("ctrl+t")
         p = self.screen.player
         self.assertEqual(p.song.id, songs.RHYTHM_ORDER[0])

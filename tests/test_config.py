@@ -42,7 +42,7 @@ class ConfigFile(unittest.TestCase):
         self.assertEqual(Config.load(), c)
 
     def test_saved_json_is_utf8_and_complete(self):
-        Config(prenatal_song="twinkle").save()
+        Config(prenatal_song="canon").save()
         with open(self.path, "r", encoding="utf-8") as f:
             data = json.load(f)
         self.assertEqual(set(data), {"mode", "timbre", "rhythm_keys", "latency_ms",

@@ -39,7 +39,7 @@ class SongSelect(HeadlessCase):
         self.assertEqual(s.index, 0)
 
     def test_song_outside_the_rhythm_list_keeps_index_zero(self):
-        self.cfg.prenatal_song = "twinkle"
+        self.cfg.prenatal_song = "twinkle"  # a retired id still in old configs
         s = self.open()
         self.assertEqual(s.index, 0)
 

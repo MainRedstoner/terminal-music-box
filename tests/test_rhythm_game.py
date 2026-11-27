@@ -16,8 +16,35 @@ except ImportError:
     from helpers import HeadlessCase
 
 
+TEST_SONG = "test_scale"
+
+
+def _test_song() -> songs.Song:
+    """A one-note-per-beat scale for the generic gameplay assertions.
+
+    The built-in library holds only the four charted songs now, and each of
+    them locks a timbre and carries a multi-voice score, which would drown out
+    the timing and judgment checks below. Injected for this module's tests
+    only; `tearDownModule` takes it back out.
+    """
+    return songs.Song(TEST_SONG, "测试音阶", "Test Scale", 120,
+                      songs.seq([(60, 1), (62, 1), (64, 1), (65, 1),
+                                 (67, 1), (69, 1), (71, 1), (72, 1)] * 2,
+                                bpm=120))
+
+
+def setUpModule():
+    songs.SONGS[TEST_SONG] = _test_song()
+    songs.BEATMAPS[TEST_SONG] = songs.beatmap_from_song(songs.SONGS[TEST_SONG])
+
+
+def tearDownModule():
+    songs.SONGS.pop(TEST_SONG, None)
+    songs.BEATMAPS.pop(TEST_SONG, None)
+
+
 class Game(HeadlessCase):
-    song = "twinkle"
+    song = TEST_SONG
 
     def setUp(self):
         super().setUp()
@@ -476,7 +503,7 @@ class TimbreLock(Game):
 
     def test_songs_without_a_lock_follow_the_user_timbre(self):
         self.assertEqual(self.cfg.timbre, "harp")  # setup default
-        self.app.navigate("rhythm_game", song="twinkle")
+        self.app.navigate("rhythm_game", song=TEST_SONG)
         self.assertEqual(self.app.current.timbre, "harp")
 
     def test_the_locked_timbre_uses_its_own_sound_settings(self):

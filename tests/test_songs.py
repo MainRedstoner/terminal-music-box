@@ -11,17 +11,17 @@ from tmb.audio.engine import AudioEngine
 
 
 class Library(unittest.TestCase):
-    def test_at_least_six_songs(self):
-        self.assertGreaterEqual(len(songs.SONGS), 6)
+    def test_the_library_is_exactly_the_rhythm_list(self):
+        self.assertGreaterEqual(len(songs.SONGS), 4)
+        self.assertEqual(songs.ORDER, songs.RHYTHM_ORDER)
         self.assertEqual(len(songs.ORDER), len(songs.SONGS))
         self.assertEqual(set(songs.ORDER), set(songs.SONGS))
 
-    def test_twinkle_is_first_and_the_default(self):
-        self.assertEqual(songs.ORDER[0], "twinkle")
-        self.assertEqual(songs.first_song_id(), "twinkle")
-        self.assertIs(songs.get_song(None), songs.SONGS["twinkle"])
-        self.assertIs(songs.get_song("no_such_song"), songs.SONGS["twinkle"])
-        self.assertIs(songs.get_song("canon"), songs.SONGS["canon"])
+    def test_canon_is_first_and_the_default(self):
+        self.assertEqual(songs.ORDER[0], "canon")
+        self.assertEqual(songs.first_song_id(), "canon")
+        self.assertIs(songs.get_song(None), songs.SONGS["canon"])
+        self.assertIs(songs.get_song("no_such_song"), songs.SONGS["canon"])
 
     def test_every_song_is_well_formed(self):
         for sid in songs.ORDER:
@@ -44,14 +44,9 @@ class Library(unittest.TestCase):
                                        max(n.time + n.dur for n in song.notes))
 
     def test_titles_follow_language(self):
-        song = songs.SONGS["twinkle"]
+        song = songs.SONGS["canon"]
         self.assertEqual(song.title("zh"), song.title_zh)
         self.assertEqual(song.title("en"), song.title_en)
-
-    def test_previously_partial_songs_are_full_versions(self):
-        # Ode to Joy: the complete 4-phrase theme; Jingle Bells: verse + chorus.
-        self.assertGreater(songs.SONGS["ode_joy"].duration, 30)
-        self.assertGreater(songs.SONGS["jingle_bells"].duration, 45)
 
     def test_turkish_march_is_the_complete_rondo(self):
         song = songs.SONGS["turkish_march"]
@@ -368,11 +363,11 @@ class Beatmaps(unittest.TestCase):
         self.assertEqual(used, set(range(6)))
 
     def test_beatmaps_are_cached(self):
-        self.assertIs(songs.get_beatmap("twinkle"), songs.get_beatmap("twinkle"))
+        self.assertIs(songs.get_beatmap("canon"), songs.get_beatmap("canon"))
 
     def test_unknown_id_falls_back_to_first_song(self):
         bm = songs.get_beatmap("not_a_song")
-        self.assertEqual(len(bm.notes), len(songs.SONGS["twinkle"].notes))
+        self.assertEqual(bm.song_id, songs.first_song_id())
 
     def test_empty_song_gives_empty_beatmap(self):
         bm = songs.beatmap_from_song(songs.Song("empty", "空", "Empty", 100, []))
@@ -554,7 +549,7 @@ class CanonChart(unittest.TestCase):
 class Player(unittest.TestCase):
     def setUp(self):
         self.eng = AudioEngine(backend=NullBackend(), realtime=False)
-        self.song = songs.get_song("twinkle")
+        self.song = songs.get_song("minuet_g")
         self.p = songs.SongPlayer(self.eng, self.song, "harp")
 
     def test_start_plays_notes_as_time_passes(self):
