@@ -402,7 +402,9 @@ class GroupedList(ThreadedCase):
             self.press("down")
         self.assertEqual(self.screen.song_index, 4)
         self.press("enter")
-        self.run_until(lambda: self.app.current_name == "rhythm_game")
+        # step_until, not run_until: the pack decodes on a worker thread and a
+        # full-speed app.step() loop starves it under the GIL (see ThreadedCase).
+        self.step_until(lambda: self.app.current_name == "rhythm_game")
         self.assertEqual(self.screen.pack.id, "test_song")
 
     def test_entering_the_pack_decodes_then_plays(self):
