@@ -15,7 +15,8 @@ from array import array
 from typing import Dict, List, Optional, Tuple
 
 from .backends import Backend, open_backend
-from .synth import SR, NoteBuffers, Timbre, fade_out, get_timbre, render_note, zeros
+from .synth import (SR, NoteBuffers, Timbre, fade_out, get_timbre,
+                    midi_to_freq, render_note, zeros)
 
 Segment = Tuple[array, bool]
 # Long natural tails make rendered notes large (~0.1-1.3 MB per key), so
@@ -103,7 +104,7 @@ class Voice:
             # Continue from the current loop phase so the tail is click-free.
             pos = self._loop_pos % len(seg)
             rot = seg[pos:] + seg[:pos]
-            rn = len(self._release) if self._release is not None and len(self._release) else int(SR * 0.08)
+            rn = len(self._release) if self._release is not None and len(self._release) else int(SR * 0.15)
             tail = zeros(rn)
             i = 0
             while i < rn:
@@ -202,6 +203,38 @@ def assemble_oneshot(nb: NoteBuffers, dur: float) -> array:
     else:
         out += rel
     return out
+
+
+def hold_segments(buf: array, midi: int) -> Tuple[array, array]:
+    """Split a ringing buffer into a natural head plus a seamless sustain loop.
+
+    Ringing timbres fill only `oneshot`, but a held key must keep sounding
+    instead of letting the natural decay die away.  The loop is one period of
+    the fundamental taken after the attack; its first samples are crossfaded
+    with the following period so the seam stays click-free even when SR/f is
+    not an integer.  Only the head (0.12 s) and one period are copied, never
+    the multi-second source buffer.
+    """
+    period = max(2, int(round(SR / midi_to_freq(midi))))
+    xfade = min(period, max(1, int(SR * 0.004)))
+    start = min(int(SR * 0.12), max(0, len(buf) - period - xfade - 1))
+    loop = array("f", buf[start:start + period])
+    tail = buf[start + period:start + period + xfade]
+    n = min(xfade, len(tail))
+    for i in range(n):
+        w = (i + 1) / (n + 1)
+        # Head of the loop slides in from the next period: the wrap from the
+        # loop's last sample into its first is then a neighbouring sample.
+        loop[i] = loop[i] * w + tail[i] * (1.0 - w)
+    head = array("f", buf[:start])
+    n = min(xfade, len(head))
+    for i in range(n):
+        w = (i + 1) / (n + 1)
+        # Slide the end of the head onto the loop's last sample, so the
+        # head flows into loop[0] exactly like the loop's own wrap.
+        idx = len(head) - n + i
+        head[idx] = head[idx] * (1.0 - w) + loop[len(loop) - n + i] * w
+    return head, loop
 
 
 class AudioEngine:
@@ -477,7 +510,9 @@ class AudioEngine:
                       sustain=True, gain=vel, steady=nb.steady)
         else:
             buf = nb.oneshot if nb.oneshot is not None else assemble_oneshot(nb, 1.0)
-            v = Voice([(buf, False)], gain=vel)
+            head, loop = hold_segments(buf, midi)
+            v = Voice([(head, False), (loop, True)], sustain=True, gain=vel,
+                      steady=loop)
         return self._add(v)
 
     def play_note(self, tid: str, midi: int, dur: float, vel: float = 1.0,

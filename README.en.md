@@ -73,11 +73,11 @@ Z X C V B N M   — low   (C3..B3)
   iron xylophone, cow bell, didgeridoo, bit, banjo, pling).
 - **Key hold**: on Kitty-protocol terminals (or Windows terminals), every
   timbre sounds while its key is held and gets a fast release on key-up —
-  sustained timbres hold a steady tone, ringing ones ring their natural
-  decay. Other terminals keep fixed-length notes, and holding never
-  re-triggers a note. WSL (ConPTY) stops delivering key releases on the
-  alternate screen, so the app automatically skips it there to keep key-up
-  events flowing.
+  sustained timbres hold a steady tone, while ringing ones settle into a
+  steady sustain loop (one period of the fundamental) after the attack. Other
+  terminals keep fixed-length notes, and holding never re-triggers a note.
+  WSL (ConPTY) stops delivering key releases on the alternate screen, so the
+  app automatically skips it there to keep key-up events flowing.
 - **Volume / length**: the strip below the keyboard — `↑/↓` switches between
   volume and note length, `←/→` steps the current timbre's value (volume
   0–2.0, length 0.25–4×; ringing timbres can only be shortened, which speeds

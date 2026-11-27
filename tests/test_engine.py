@@ -101,13 +101,21 @@ class VoiceBookkeeping(unittest.TestCase):
         v.pull(int(len(natural) * 0.5))
         self.assertTrue(v.done)  # -60 dB by the shortened length
 
-    def test_note_off_ringing_timbre_gets_a_fast_release(self):
+    def test_ringing_note_loops_while_held_and_releases_on_note_off(self):
         vid = self.eng.note_on("harp", 60)
         v = self.eng._voices[vid]
-        self.assertFalse(v._sustain)
+        self.assertTrue(v._sustain)  # held ringing notes loop a period
+        self.assertEqual([loop for _, loop in v._segments], [False, True])
         self.eng.note_off(vid)
-        self.assertGreater(v._fade_left, 0)
-        self.assertLessEqual(v._fade_total, int(synth.SR * 0.1))
+        self.assertEqual([loop for _, loop in v._segments], [False])
+        self.assertLessEqual(len(v._segments[0][0]), int(synth.SR * 0.16))
+
+    def test_ringing_hold_loop_seam_is_click_free(self):
+        vid = self.eng.note_on("harp", 60)
+        loop = self.eng._voices[vid]._steady
+        self.assertGreater(len(loop), 1)
+        diffs = [abs(loop[i] - loop[i - 1]) for i in range(1, len(loop))]
+        self.assertLessEqual(abs(loop[0] - loop[-1]), max(diffs) * 1.5)
 
     def test_play_note_length_extends_sustained_assembly(self):
         vid = self.eng.play_note("flute", 60, 0.5, length=4.0)
