@@ -8,7 +8,7 @@ from tmb import songs
 from tmb.audio import synth
 from tmb.events import KeyEvent
 from tmb.screens.freeplay import (ACTIVITY_WINDOW, KEY_MIDI, PRELOAD_MIDIS,
-                                  STUCK_TIMEOUT, REPEAT_TIMEOUT, WAIT_TIMEOUT)
+                                  REPEAT_TIMEOUT, WAIT_TIMEOUT)
 
 try:
     from tests.helpers import HeadlessCase, has_cjk
@@ -74,14 +74,39 @@ class FreePlay(HeadlessCase):
         self.assertEqual([loop for _, loop in voice._segments], [False])  # tail rings
         self.assertEqual(self.engine.active(), 1)
 
-    def test_a_lost_release_frees_the_key_after_the_stuck_timeout(self):
+    def test_holding_two_keys_keeps_the_first_one_sounding(self):
         self.cfg.timbre = "bit"
         self.press("a")
-        self.advance(STUCK_TIMEOUT + 0.3, dt=0.1)
+        self.press("s")
+        # Auto-repeat follows only the most recently pressed key, so the first
+        # key goes silent while it is still held down. That silence must not
+        # be mistaken for a lost release.
+        rf = self.app.render_frames
+        self.app.render_frames = False
+        try:
+            for _ in range(60):  # 3 s, well past the old 2 s stuck timeout
+                self.term.send(KeyEvent("s", pressed=True, repeat=True))
+                self.app.step(0.05)
+        finally:
+            self.app.render_frames = rf
+        self.assertTrue(self.screen.key_down.get("a"))
+        self.assertTrue(self.screen.key_down.get("s"))
+        self.assertEqual(set(self.screen.key_voice), {"a", "s"})
+        self.assertEqual(self.engine.active(), 2)
+
+    def test_a_held_key_survives_without_repeat_events(self):
+        self.cfg.timbre = "bit"
+        self.press("a")
+        self.advance(3.0, dt=0.05)
+        # With real key-up events, silence is not evidence of a release: only
+        # the key-up ends the voice. (Leaving the screen or switching timbre
+        # clears a genuinely lost release.)
+        self.assertTrue(self.screen.key_down.get("a"))
+        self.assertIn("a", self.screen.key_voice)
+        self.assertEqual(self.engine.active(), 1)
+        self.release("a")
         self.assertEqual(self.screen.key_down, {})
         self.assertEqual(self.screen.key_voice, {})
-        voice = next(iter(self.engine._voices.values()))
-        self.assertEqual([loop for _, loop in voice._segments], [False])  # capped off
 
     def test_repeat_events_never_retrigger_a_note(self):
         self.press("a")
