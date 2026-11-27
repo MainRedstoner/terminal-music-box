@@ -27,8 +27,6 @@ NOTE_NAMES = {0: "C", 2: "D", 4: "E", 5: "F", 7: "G", 9: "A", 11: "B"}
 PRELOAD_MIDIS = sorted(set(KEY_MIDI.values()))
 
 REPEAT_TIMEOUT = 0.2   # auto-repeat debounce: legacy terminals have no key-up
-MAX_HOLD = 8.0         # safety cap on a held voice if a release event is lost
-STUCK_TIMEOUT = 2.0    # release events enabled but none arrived for this long
 ACTIVITY_WINDOW = 2.0
 WAIT_TIMEOUT = 60.0    # a wedged preload must not silence prenatal mode forever
 NOTE_DUR = 1.0
@@ -296,15 +294,13 @@ class FreePlayScreen(Screen):
 
     def update(self, dt: float) -> None:
         self.clock += dt
-        if self.app.release_events():
-            # Releases arrive as events. A held key keeps producing repeat
-            # events; if none arrive for STUCK_TIMEOUT the release was lost
-            # (e.g. a terminal that advertises event types but never sends
-            # them), so free the key instead of droning forever.
-            for key, t0 in list(self.last_event.items()):
-                if self.clock - t0 > STUCK_TIMEOUT:
-                    self._release(key)
-        else:
+        if not self.app.release_events():
+            # Legacy terminals never report key-up, so a key counts as released
+            # once its auto-repeat stops. Terminals with real key-up must not
+            # use this heuristic: auto-repeat only follows the most recently
+            # pressed key, so a key held underneath a newer one goes silent
+            # while it is still down. Expiring it would cut the note short
+            # when two keys are held together.
             for key in list(self.key_down):
                 if self.clock - self.last_event.get(key, 0.0) > REPEAT_TIMEOUT:
                     self._release(key)
