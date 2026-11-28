@@ -199,7 +199,10 @@ class Calibration(HeadlessCase):
         c = self.screen
         for k in range(1, count + 1):
             self.run_until(lambda: c.clock >= k * c.PERIOD + offset, dt=0.005)
-            self.press("j", dt=0.005)
+            # A real tap is down+up: press() alone models holding the key,
+            # which the calibration screen must (and now does) treat as one
+            # tap plus auto-repeat, not twelve taps.
+            self.tap("j", dt=0.005)
 
     def test_metronome_keeps_playing(self):
         self.advance(1.3)

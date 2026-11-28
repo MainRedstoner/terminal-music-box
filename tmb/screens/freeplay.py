@@ -87,6 +87,13 @@ class FreePlayScreen(Screen):
         self._clear_keys()
         if picking:
             self._resuming = True
+            if self.player is not None:
+                # Freeze the melody while the picker is up. The player follows
+                # the audio clock even offscreen (update() is not called, so
+                # nothing schedules the notes it crosses — silence with the
+                # clock still running), and returning used to fire every note
+                # it had crossed in one zero-delay burst.
+                self.player.pause()
             return
         self._resuming = False
         if self.player is not None:
@@ -201,7 +208,7 @@ class FreePlayScreen(Screen):
     def _open_timbre(self) -> None:
         self._picking = True
         self.app.navigate("timbre_select", on_select=self._apply_timbre,
-                          back="freeplay", selected=self.config.timbre)
+                          back="freeplay", selected=self._active_timbre())
 
     def _apply_timbre(self, tid: str) -> None:
         self.config.timbre = tid
@@ -372,6 +379,10 @@ class FreePlayScreen(Screen):
             if self._waiting:
                 if self._ensure_buffers():
                     self._waiting = False
+                    # The gate's wait ate into the activity window: opening
+                    # it must not instantly trip the idle pause below — once
+                    # paused, nothing re-arms the melody on its own.
+                    self.last_activity = self.clock
                 elif self.clock - self._wait_started > WAIT_TIMEOUT:
                     # A wedged render must not wedge the screen for good:
                     # stop waiting and take the stalls as they come. Playback

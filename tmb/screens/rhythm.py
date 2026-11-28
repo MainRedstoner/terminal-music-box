@@ -7,7 +7,10 @@ from ..ansi import Screen as Buffer, C, text_width
 from ..events import (KeyEvent, ENTER, SPACE, TAB, BACKSPACE, is_exit,
                       UP, DOWN, LEFT, RIGHT)
 from ..ui import (center_text, draw_box, draw_button, draw_menu_row,
-                  draw_search_field, draw_search_result_row, matches)
+                  draw_search_field, draw_search_result_row, matches,
+                  QUERY_MAX)
+
+REPEAT_TIMEOUT = 0.18  # auto-repeat debounce (legacy terminals have no key-up)
 from .base import Screen
 from .. import songs
 
@@ -100,9 +103,14 @@ class RhythmMenuScreen(Screen):
         if pack is None:
             if self._song_ready(sid):
                 self._pending_song = None
+                self._pending_pack = None
                 self.app.navigate("rhythm_game", song=sid)
                 return
+            # A pack left pending from an earlier Enter must not win once the
+            # user has picked a built-in song: update() branches on
+            # _pending_pack first and would start that pack when it decoded.
             self._pending_song = sid
+            self._pending_pack = None
             timbre, midis = self._song_audio(sid)
             self.audio.preload(timbre, midis)
             return
@@ -202,11 +210,11 @@ class RhythmMenuScreen(Screen):
                 self._apply_query()
                 return
             if k == SPACE:
-                self.query += " "
+                self.query = (self.query + " ")[-QUERY_MAX:]
                 self._apply_query()
                 return
             if len(k) == 1:
-                self.query += k
+                self.query = (self.query + k)[-QUERY_MAX:]
                 self._apply_query()
                 return
             if k == UP:
@@ -345,6 +353,8 @@ class RhythmCalibScreen(Screen):
         self.done = False
         self.status = ""
         self.status_fg = C.green
+        self._held: set = set()
+        self._last_tap: dict = {}
 
     def exit(self) -> None:
         self.audio.stop_all()
@@ -360,6 +370,7 @@ class RhythmCalibScreen(Screen):
 
     def handle_key(self, ev: KeyEvent) -> None:
         if not ev.pressed:
+            self._held.discard(ev.key)
             return
         k = ev.key
         if is_exit(k):
@@ -367,6 +378,20 @@ class RhythmCalibScreen(Screen):
         elif k == "r":
             self._reset()
         elif not self.done:
+            if ev.repeat:
+                return
+            if self.app.release_events():
+                if k in self._held:
+                    return  # still held: auto-repeat without a repeat flag
+                self._held.add(k)
+            else:
+                # No key-up events: a hold is only visible as the burst of
+                # repeats it produces, so time-debounce each key like the
+                # game screen does. One physical hold must not fill the
+                # whole sample set with garbage offsets.
+                if self.clock - self._last_tap.get(k, -1e9) < REPEAT_TIMEOUT:
+                    return
+            self._last_tap[k] = self.clock
             self._tap()
 
     def _tap(self) -> None:
@@ -390,6 +415,8 @@ class RhythmCalibScreen(Screen):
         self.done = False
         self.clock = 0.0
         self._beat = 0
+        self._held = set()
+        self._last_tap = {}
         self.status = self.theme.t("rhythm.calib_reset")
         self.status_fg = C.yellow
 
