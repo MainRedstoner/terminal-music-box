@@ -127,7 +127,8 @@ def apply_dynamics(notes: List[Note], bpm: float,
     """Set every note's vel from the score's own dynamics, in place.
 
     `marks` transcribes the dynamic markings of the source edition, one
-    entry per marking, in beats from the song start:
+    entry per marking, in beats from the song start — time zero, not the
+    first note (a `seq` `start` offset or a late entry shifts the grid):
 
     - `(beat, level)` — a step: from this beat on the level holds.
     - `(beat, level, ramp_end)` — a hairpin: the level interpolates linearly
