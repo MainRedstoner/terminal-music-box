@@ -113,12 +113,13 @@ def timed(items, bpm: float) -> List[Note]:
     return out
 
 
-# Notated dynamic levels (强弱), as fractions of full voice gain. The ladder
-# mirrors the written gradations (pp < p < mp < mf < f < ff); hairpin marks
-# interpolate between neighbouring levels. The user's volume setting
-# multiplies on top, so the loudest written level stays at full gain.
-DYNAMIC_LEVELS = {"pp": 0.45, "p": 0.55, "mp": 0.68, "mf": 0.8,
-                  "f": 0.95, "ff": 1.0, "fz": 1.0}
+# Notated dynamic levels (强弱), as fractions of a full-strength note. The
+# ladder is spread wider than the written gradations on purpose: notation
+# spans tens of dB and a narrow linear ladder compresses every step into
+# inaudibility on a synth. Hairpin marks interpolate between neighbouring
+# levels; the user's volume setting multiplies on top.
+DYNAMIC_LEVELS = {"pp": 0.28, "p": 0.38, "mp": 0.52, "mf": 0.68,
+                  "f": 0.86, "ff": 1.0, "fz": 1.0}
 
 
 def apply_dynamics(notes: List[Note], bpm: float,
@@ -325,6 +326,17 @@ class SongPlayer:
     # clamped frame cannot jitter or shift the onsets.
     SCHEDULE_LOOKAHEAD = 0.05
 
+    # Polyphony headroom. Every rendered note peaks at 0.85 pre-master, so an
+    # auto-played texture of 3-6 sounding voices sums past the mixer's
+    # adaptive ceiling in *every* passage — soft ones included — and the
+    # ducking then renormalizes everything back toward one loudness,
+    # cancelling the score's dynamics (measured: a notated p->f step came out
+    # as 0.6 dB). Scaling the melody down leaves the soft passages under the
+    # ceiling so they play unducked, and only a genuine tutti chord triggers
+    # the limiter: the ceiling pins the loudest written level and the
+    # velocities below it pass through untouched.
+    POLYPHONY_GAIN = 0.45
+
     def __init__(self, engine, song: Song, timbre: str,
                  vol: float = 1.0, length: float = 1.0):
         self.engine = engine
@@ -415,7 +427,8 @@ class SongPlayer:
                 now = self._base + (self._clock() - self._t0)
                 delay = int(max(0.0, n.time - now) * self.engine.sr)
             self.engine.play_note(self.timbre, n.midi, n.dur * self.length,
-                                  n.vel * self.vol, delay=delay)
+                                  n.vel * self.vol * self.POLYPHONY_GAIN,
+                                  delay=delay)
             self.idx += 1
         if self.idx >= len(notes) and self.pos >= self.song.duration:
             self.finished = True

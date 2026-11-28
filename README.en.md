@@ -201,7 +201,12 @@ notate: the Turkish March's Mutopia typeset ships a dedicated dynamics voice
 (p/mp/f/ff, crescendos, sforzandi) and auto-play follows it note by note;
 Für Elise is pp throughout per its source; the two Baroque pieces carry no
 dynamic markings at all, so they keep a uniform level. Both the rhythm game's
-auto-played melody and prenatal playback follow the score's dynamics.
+auto-played melody and prenatal playback follow the score's dynamics; the
+auto-play additionally yields polyphony headroom (`SongPlayer.POLYPHONY_GAIN`)
+so soft passages never trigger the mixer's adaptive ducking and the dynamics
+pass through untouched — the limiter only steps in on the loudest tuttis
+(such as the closing chords), pinning the strongest written level to the
+peak ceiling.
 
 ## External Song Packs
 

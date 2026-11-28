@@ -777,9 +777,9 @@ class PlayerAudioClock(unittest.TestCase):
         self.assertEqual([d for _, d, _ in self.eng.played], [0, 0, 0])
 
     def test_the_score_velocity_reaches_the_engine(self):
-        # 强弱: the player hands each note's vel times the user's volume to
-        # the mixer, so the rhythm game and prenatal auto-play both follow
-        # the score's dynamics.
+        # 强弱: the player hands each note's vel times the user's volume
+        # (times the polyphony headroom) to the mixer, so the rhythm game and
+        # prenatal auto-play both follow the score's dynamics.
         song = songs.Song("dyn", "强弱", "Dynamics", 120, [
             songs.Note(0.0, 60, 0.2, vel=0.5),
             songs.Note(0.5, 62, 0.2, vel=1.0),
@@ -788,7 +788,9 @@ class PlayerAudioClock(unittest.TestCase):
         p.start()
         self.eng.now = 1.0
         p.update(0.016)
-        self.assertEqual([v for _, _, v in self.eng.played], [0.4, 0.8])
+        expected = [(0.5 * 0.8) * songs.SongPlayer.POLYPHONY_GAIN,
+                    (1.0 * 0.8) * songs.SongPlayer.POLYPHONY_GAIN]
+        self.assertEqual([v for _, _, v in self.eng.played], expected)
 
     def test_pause_freezes_and_resume_continues_from_the_frozen_position(self):
         self.p.start()
