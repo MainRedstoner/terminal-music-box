@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, fields
 from typing import Dict, List, Optional, Tuple
 
 DEFAULT_KEYS = ["a", "s", "d", "j", "k", "l"]
@@ -77,19 +77,35 @@ class Config:
         try:
             with open(config_path(), "r", encoding="utf-8") as f:
                 data = json.load(f)
-            cfg = cls()
-            for k, v in data.items():
-                if hasattr(cfg, k):
-                    setattr(cfg, k, v)
-            if not isinstance(cfg.rhythm_keys, list) or len(cfg.rhythm_keys) != 6:
-                cfg.rhythm_keys = list(DEFAULT_KEYS)
-            cfg.rhythm_keys = [str(k).lower()[:1] for k in cfg.rhythm_keys]
-            if cfg.mode not in ("unicode", "ascii"):
-                cfg.mode = "unicode"
-            if not isinstance(cfg.sound, dict):
-                cfg.sound = {}
-            cfg.sound = {str(k): dict(v) for k, v in cfg.sound.items()
-                         if isinstance(v, dict)}
-            return cfg
         except (OSError, ValueError, TypeError):
             return cls()
+        if not isinstance(data, dict):
+            # A hand-edited file with a non-object root used to crash the app
+            # on startup ('list' object has no attribute 'items').
+            return cls()
+        cfg = cls()
+        # Whitelist real fields only: hasattr() also matched method names, so
+        # {"save": 1} could replace the save() method and blow up later.
+        known = {f.name for f in fields(cls)}
+        for k, v in data.items():
+            if k in known:
+                setattr(cfg, k, v)
+        if not isinstance(cfg.rhythm_keys, list) or len(cfg.rhythm_keys) != 6:
+            cfg.rhythm_keys = list(DEFAULT_KEYS)
+        cfg.rhythm_keys = [str(k).lower()[:1] for k in cfg.rhythm_keys]
+        if cfg.mode not in ("unicode", "ascii"):
+            cfg.mode = "unicode"
+        if not isinstance(cfg.timbre, str) or not cfg.timbre:
+            cfg.timbre = "harp"
+        if cfg.prenatal_song is not None and not isinstance(cfg.prenatal_song, str):
+            cfg.prenatal_song = None
+        # A wrong-typed number used to survive the load and crash later —
+        # latency_ms/1000.0 with a string, float() on scroll_speed — inside
+        # the rhythm game's enter().
+        cfg.latency_ms = int(_num(cfg.latency_ms, 0))
+        cfg.scroll_speed = _num(cfg.scroll_speed, 1.0)
+        if not isinstance(cfg.sound, dict):
+            cfg.sound = {}
+        cfg.sound = {str(k): dict(v) for k, v in cfg.sound.items()
+                     if isinstance(v, dict)}
+        return cfg
