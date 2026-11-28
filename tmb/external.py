@@ -36,6 +36,11 @@ PACK_EXT = ".tmbp"
 FORMAT_VERSION = 1
 DEFAULT_LEAD_IN = 2.0
 READ_CHUNK = 1 << 16
+# A pack's numbers are untrusted, and isfinite alone is not enough: a finite
+# value large enough to overflow once scaled (int(1e308 * 44100) converts the
+# product to inf) still crashes start_decode, PackPlayer.sync or the falling
+# note draw. Time-like fields get a hard bound; 24 h is past any real song.
+MAX_SECONDS = 24 * 60 * 60.0
 # Whole-process bound on one ffmpeg run. A stalled ffmpeg (alive, silent)
 # must not hold the single decode slot forever — killing it makes the stdout
 # read hit EOF and the failure path report normally. Desktops decode a
@@ -106,8 +111,10 @@ class Pack:
         self.title_en = _sanitize_text(str(manifest.get("title_en") or self.title_zh)) or self.title_zh
         self.artist = _sanitize_text(str(manifest.get("artist") or ""))
         self.audio_name = str(manifest.get("audio") or "")
-        self.duration = max(0.0, _num(manifest.get("duration"), 0.0))
-        self.offset = max(0.0, _num(manifest.get("offset"), 0.0))
+        self.duration = min(MAX_SECONDS,
+                            max(0.0, _num(manifest.get("duration"), 0.0)))
+        self.offset = min(MAX_SECONDS,
+                          max(0.0, _num(manifest.get("offset"), 0.0)))
         self.lead_in = min(10.0, max(0.5, _num(manifest.get("lead_in"),
                                                DEFAULT_LEAD_IN)))
         self.difficulty = _sanitize_text(str(manifest.get("difficulty") or "Normal")) or "Normal"
@@ -148,8 +155,12 @@ def _parse_chart(raw: bytes) -> List[Tuple[float, int]]:
         except (TypeError, ValueError):
             raise PackError("chart.json: note must be [time, lane]")
         t = _num(t, -1.0)
-        if t < 0.0:
-            raise PackError("chart.json: negative note time %r" % (item,))
+        if not 0.0 <= t <= MAX_SECONDS:
+            # Non-finite times arrive here as the -1 default. The bound also
+            # keeps int(time * speed) in the falling-note draw finite: a
+            # huge-but-finite value overflowed to inf there.
+            raise PackError("chart.json: invalid note time %r (0..%g s)"
+                            % (item, MAX_SECONDS))
         if not isinstance(lane, int) or not 0 <= lane <= 5:
             raise PackError("chart.json: lane must be 0..5 (%r)" % (item,))
         notes.append((t, lane))
@@ -392,7 +403,9 @@ class PackPlayer:
         self.engine = engine
         self.pcm = pcm
         self.sr = engine.sr
-        self.offset = max(0.0, offset)
+        # Bound a directly constructed player too: the offset goes through
+        # int(offset * sr) every sync, and a huge finite value overflows it.
+        self.offset = min(MAX_SECONDS, max(0.0, offset))
         self.gain = min(2.0, max(0.0, volume))
         self._vid: Optional[int] = None
         self._base = 0        # frames played before the current voice

@@ -452,5 +452,29 @@ class PendingPackRace(ThreadedCase):
         # the menu must not navigate into it.
         self.assertEqual(self.app.current_name, "rhythm_menu")
         self.assertEqual(self.screen._pending_song, "fur_elise")
+
+
+class QueuedNotice(HeadlessCase):
+    """The queued-decode notice belongs to the pack choice: picking a
+    built-in song must clear it instead of leaving a stale red hint."""
+
+    start_screen = "rhythm_menu"
+
+    def setUp(self):
+        super().setUp()
+        self.engine.realtime = True
+        self.engine.is_preloaded = mock.Mock(return_value=False)
+        self.engine.preload = mock.Mock()
+
+    def test_a_builtin_pick_clears_the_queued_notice(self):
+        self.screen.notice = self.app.theme.t("rhythm.decode_queued")
+        self.screen.notice_fg = C.cyan
+        self.press("enter")             # first built-in song: cold, starts a preload
+        self.step()
+        self.assertEqual(self.screen.notice, "")
+        self.assertEqual(self.screen._pending_song, "canon")
+        self.assertIsNone(self.screen._pending_pack)
+
+
 if __name__ == "__main__":
     unittest.main()

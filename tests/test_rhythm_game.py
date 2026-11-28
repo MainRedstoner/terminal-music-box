@@ -118,6 +118,13 @@ class Setup(Game):
         self.advance(1.0)
         self.assertTrue(self.frame.strip())
 
+    def test_a_huge_scroll_speed_is_bounded_before_the_draw(self):
+        # A corrupt finite 1e308 used to turn `speed` into inf and crash the
+        # falling-note draw on an ordinary built-in chart.
+        self.restart(scroll_speed=1e308)
+        self.assertEqual(self.game.scroll_speed, 8.0)
+        self.assertEqual(self.game.state, "countdown")
+
 
 class Judgment(Game):
     def test_perfect_hit_on_the_note_time(self):

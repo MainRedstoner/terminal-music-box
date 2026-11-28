@@ -905,5 +905,7 @@ class OffscreenFreeze(HeadlessCase):
         # Canon locks the didgeridoo; the list must not highlight harp.
         self.assertEqual(self.app.current.index,
                          synth.ORDER.index(songs.SONGS["canon"].timbre))
+
+
 if __name__ == "__main__":
     unittest.main()

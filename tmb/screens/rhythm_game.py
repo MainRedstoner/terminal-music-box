@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 from ..ansi import Screen as Buffer, C, text_width
 from ..events import KeyEvent, ESC, ENTER, SPACE, UP, DOWN, is_exit
 from ..ui import draw_box, draw_button, center_text
+from ..config import SCROLL_RANGE
 from .. import songs
 from .base import Screen
 
@@ -78,7 +79,9 @@ class RhythmGameScreen(Screen):
         self.lane_keys = keys
         self.key_lane: Dict[str, int] = {k: i for i, k in enumerate(keys)}
         self.offset_sec = self.config.latency_ms / 1000.0
-        self.scroll_speed = max(0.2, float(self.config.scroll_speed or 1.0))
+        self.scroll_speed = min(SCROLL_RANGE[1],
+                                max(SCROLL_RANGE[0],
+                                    float(self.config.scroll_speed or 1.0)))
         self.score = 0
         self.combo = 0
         self.maxcombo = 0
@@ -338,7 +341,13 @@ class RhythmGameScreen(Screen):
             bw = max(1, lane_w - 2)
             bx = cx - bw // 2
             col = PALETTE[lane]
-            head_y = int(round(judge_y - (n.time - ht) * speed))
+            y = judge_y - (n.time - ht) * speed
+            # Compare before int(): a huge chart time (or a corrupt scroll
+            # speed) overflows this float to inf, and int(round(inf)) would
+            # crash the frame on every render.
+            if not field_top - 1 <= y <= judge_y + 1:
+                continue
+            head_y = int(round(y))
             if field_top <= head_y <= judge_y:
                 scr.fill(bx, head_y, bw, 1, tap, col, None, True)
         ky = judge_y + 1

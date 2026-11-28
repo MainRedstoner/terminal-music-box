@@ -186,6 +186,16 @@ class ConfigFile(unittest.TestCase):
         self.write({"scroll_speed": 10 ** 400})
         self.assertEqual(Config.load().scroll_speed, 1.0)
 
+    def test_scroll_speed_is_bounded_on_load(self):
+        # Finite-but-huge survives isfinite and then makes `speed` inf in the
+        # falling-note draw; the bound keeps the game drawable.
+        self.write({"scroll_speed": 1e308})
+        self.assertEqual(Config.load().scroll_speed, 8.0)
+        self.write({"scroll_speed": 0.01})
+        self.assertEqual(Config.load().scroll_speed, 0.2)
+        self.write({"scroll_speed": 2.5})
+        self.assertEqual(Config.load().scroll_speed, 2.5)
+
 
 class ConfigPath(unittest.TestCase):
     def test_windows_uses_appdata(self):

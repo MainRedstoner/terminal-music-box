@@ -6,7 +6,8 @@ import unittest
 
 from tmb.ansi import Screen
 from tmb.theme import theme_for
-from tmb.ui import draw_button, draw_menu_row, draw_search_field
+from tmb.ui import (draw_button, draw_menu_row, draw_search_field,
+                    draw_loading_overlay)
 
 TH = theme_for("unicode")
 
@@ -85,6 +86,20 @@ class QueryCap(HeadlessCase):
             self.press("a")
         self.assertEqual(len(self.screen.query), QUERY_MAX)
         self.assertEqual(self.screen.query, "a" * QUERY_MAX)
+
+
+class LoadingOverlay(unittest.TestCase):
+    """A done/total ratio over 1 must not draw past the popup's box."""
+
+    def test_an_over_total_progress_is_clamped(self):
+        scr = Screen(80, 24)
+        draw_loading_overlay(scr, TH, 132300, 22050)   # done = 6x total
+        text = scr.plain_text()
+        self.assertIn("100%", text)
+        self.assertNotIn("600%", text)
+        # The bar is 30 cells wide; the unclamped draw wrote 37 and spilled
+        # over the right border.
+        self.assertLessEqual(text.count("█"), 30)
 
 
 if __name__ == "__main__":

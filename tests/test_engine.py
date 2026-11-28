@@ -420,6 +420,35 @@ class Preload(unittest.TestCase):
         self.assertEqual((done, total), (2, 2))   # 标记完成 -> healing 可重试
         self.assertFalse(self.eng.is_preloaded("bit", (60, 62)))
 
+    def test_a_parallel_failure_fallback_does_not_overcount(self):
+        """串行兜底不能把已缓存的键再数一遍：done 必须停在 total。"""
+        import tmb.audio.engine as E
+
+        class Fut:
+            def __init__(self, i):
+                self.i = i
+
+            def get(self, timeout=None):
+                if self.i >= 3:
+                    raise RuntimeError("worker died")
+                return synth.NoteBuffers(oneshot=synth.zeros(8))
+
+        class Pool:
+            def __init__(self):
+                self.n = 0
+
+            def apply_async(self, fn, args, error_callback=None):
+                self.n += 1
+                return Fut(self.n)
+
+        keys = tuple(range(60, 68))
+        with mock.patch.object(E, "_mp_enabled", lambda: True), \
+                mock.patch.object(E, "_get_pool", lambda: Pool()):
+            self.eng.preload("bit", keys)
+            done, total = self._wait_idle()
+        self.assertEqual((done, total), (8, 8))
+        self.assertTrue(self.eng.is_preloaded("bit", keys))
+
     def test_a_request_wider_than_the_cache_still_opens_the_gate(self):
         """请求比上限宽时，裁掉的只能是别的键，不能是请求自己。"""
         score = tuple(range(60, 72))              # 12 键 > 上限 8
@@ -645,5 +674,7 @@ class StopCleanup(unittest.TestCase):
         self.assertAlmostEqual(post[3], atk[n + 3], delta=0.01)
         self.assertLess(abs(post[0] - pre[-1]), 0.15)
         self.assertGreater(peak(post[:64]), 0.01)    # and it still sounds
+
+
 if __name__ == "__main__":
     unittest.main()

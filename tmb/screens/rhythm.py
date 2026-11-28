@@ -128,6 +128,7 @@ class RhythmMenuScreen(Screen):
         ext = self.app.external
         if not ext.can_decode(pack):
             self.notice = self.theme.t("rhythm.need_ffmpeg")
+            self.notice_fg = C.red
             return
         self.notice = ""
         if ext.is_ready(pack.id):

@@ -10,6 +10,10 @@ from typing import Dict, List, Optional, Tuple
 DEFAULT_KEYS = ["a", "s", "d", "j", "k", "l"]
 VOL_RANGE = (0.0, 2.0)     # per-timbre volume multiplier
 LEN_RANGE = (0.25, 4.0)    # per-timbre note-length multiplier (1.0 = natural)
+# Note fall speed multiplier. The upper bound keeps the falling-note draw's
+# position math finite: a corrupt huge value made `speed` inf, and the int()
+# conversion then crashed the whole app on a perfectly normal chart.
+SCROLL_RANGE = (0.2, 8.0)
 # Timbres whose natural default differs from 1.0x / full volume.
 DEFAULT_SOUND = {"bit": {"vol": 1.0, "len": 0.25}}
 
@@ -111,7 +115,7 @@ class Config:
         # latency_ms/1000.0 with a string, float() on scroll_speed — inside
         # the rhythm game's enter().
         cfg.latency_ms = int(_num(cfg.latency_ms, 0))
-        cfg.scroll_speed = _num(cfg.scroll_speed, 1.0)
+        cfg.scroll_speed = _clamp(_num(cfg.scroll_speed, 1.0), *SCROLL_RANGE)
         if not isinstance(cfg.sound, dict):
             cfg.sound = {}
         cfg.sound = {str(k): dict(v) for k, v in cfg.sound.items()

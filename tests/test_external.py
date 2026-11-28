@@ -147,6 +147,33 @@ class PackParsing(unittest.TestCase):
         with self.assertRaises(external.PackError):
             external.read_pack(path)
 
+    def test_non_finite_manifest_numbers_fall_back(self):
+        path = build_pack(self.tmp.name, sid="nonfinite",
+                          manifest={"duration": float("inf"),
+                                    "offset": float("-inf")})
+        pack = external.read_pack(path)
+        self.assertEqual(pack.duration, 0.0)
+        self.assertEqual(pack.offset, 0.0)
+
+    def test_huge_manifest_numbers_are_bounded(self):
+        # isfinite was not enough: int(1e308 * 44100) overflows to inf and
+        # took the whole app down when the pack was selected.
+        path = build_pack(self.tmp.name, sid="huge",
+                          manifest={"duration": 1e308, "offset": 1e308})
+        pack = external.read_pack(path)
+        self.assertEqual(pack.duration, external.MAX_SECONDS)
+        self.assertEqual(pack.offset, external.MAX_SECONDS)
+
+    def test_non_finite_and_absurd_chart_times_are_rejected(self):
+        # inf/nan collapse to the -1 default here; the finite 1e308 used to
+        # slip through and overflow the falling-note draw instead.
+        for chart in ([[float("inf"), 0]], [[float("nan"), 0]],
+                      [[1e308, 0]]):
+            with self.subTest(chart=chart):
+                path = build_pack(self.tmp.name, sid="badtime", chart=chart)
+                with self.assertRaises(external.PackError):
+                    external.read_pack(path)
+
     def test_rejects_a_corrupt_zip(self):
         path = os.path.join(self.tmp.name, "bad.tmbp")
         with open(path, "wb") as f:
@@ -299,6 +326,14 @@ class PackPlayerLogic(unittest.TestCase):
         p = external.PackPlayer(eng, array.array("h", range(10)), volume=0.5)
         p.sync(0.0, lead_in=0.0)
         self.assertEqual(eng.voices[1]["gain"], 0.5)
+
+    def test_a_huge_offset_is_bounded_before_the_frame_math(self):
+        p = external.PackPlayer(FakeEngine(sr=100),
+                                array.array("h", range(100)),
+                                offset=1e308)
+        self.assertEqual(p.offset, external.MAX_SECONDS)
+        p.sync(1.0, lead_in=0.0)   # int(inf) used to raise right here
+        self.assertTrue(p.finished)  # the offset is past the audio
 
 
 class PackPlayerEngine(unittest.TestCase):
@@ -539,6 +574,12 @@ class LibraryBehaviour(unittest.TestCase):
         self.lib.release_all()
         self.assertIsNone(self.lib.get_pcm("a"))
 
+    def test_an_absurd_chart_time_is_a_warning_not_a_crash(self):
+        build_pack(self.tmp.name, sid="badtime", chart=[[1e308, 0]])
+        self.lib.refresh()          # must not raise
+        self.assertEqual(self.lib.packs, [])
+        self.assertTrue(self.lib.warnings)
+
 
 class CorruptMembers(unittest.TestCase):
     """X1: member-level corruption surfaces as PackError, never as a raw
@@ -763,7 +804,36 @@ class RefreshCache(unittest.TestCase):
         self.assertEqual(self.lib.error("a"), "MemoryError")
 
 
+@unittest.skipUnless(HAS_FFMPEG, "ffmpeg required")
+class DecodeProgress(unittest.TestCase):
+    """The decode total grows with the frames actually produced: a manifest
+    duration shorter than the audio used to report done > total (the loading
+    popup then drew 600% over its box)."""
 
+    def test_the_total_grows_with_the_frames(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        build_pack(tmp.name, sid="short", audio="audio.opus",
+                   data=b"\x00" * 8, manifest={"duration": 0.5})
+        lib = external.Library(engine_sr=44100, directory=tmp.name)
+        lib.refresh()
+        seen = []
+
+        def fake_ffmpeg(path, sr, progress=None):
+            progress(50000)                 # far past the 0.5 s claim
+            seen.append(lib.status())
+            return array.array("h", [0] * 16)
+
+        with mock.patch.object(external, "_decode_ffmpeg_file", fake_ffmpeg):
+            self.assertTrue(lib.start_decode("short"))
+            for _ in range(2000):
+                if not lib.status()[0]:
+                    break
+                time.sleep(0.005)
+        self.assertTrue(seen)
+        active, done, total = seen[0]
+        self.assertTrue(active)
+        self.assertEqual((done, total), (50000, 50000))
 
 
 class Watchdog(unittest.TestCase):
@@ -827,5 +897,7 @@ class StreamRewind(unittest.TestCase):
         # 0.5 s resampled to 44100 Hz: without the rewind the copy started
         # after the data-chunk header and ffmpeg decoded garbage.
         self.assertAlmostEqual(len(pcm), 22050, delta=4410)
+
+
 if __name__ == "__main__":
     unittest.main()
