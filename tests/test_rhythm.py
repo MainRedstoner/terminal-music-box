@@ -405,6 +405,22 @@ class CalibrationHolds(HeadlessCase):
         self.assertFalse(self.screen.done)
         self.assertEqual(self.cfg.latency_ms, 0)
 
+    def test_a_realistic_long_hold_registers_one_tap(self):
+        # Windows-style auto-repeat: no events during the OS repeat delay
+        # (~0.25 s), then one repeat every 40 ms. The debounce window must
+        # cover that initial delay, or phantom taps survive it and pollute
+        # the persisted latency.
+        self.run_until(lambda: self.screen.clock >= 0.3, dt=0.005)
+        self.term.key("j")                  # the press
+        self.app.step(0.005)
+        self.app.step(0.25)                 # repeat delay: silence
+        for _ in range(24):
+            self.term.key("j")              # repeats every 40 ms
+            self.app.step(0.04)
+        self.assertEqual(len(self.screen.offsets), 1)
+        self.assertFalse(self.screen.done)
+        self.assertEqual(self.cfg.latency_ms, 0)
+
 
 class PendingPackRace(ThreadedCase):
     """R2: a pack decoding from an earlier Enter must not win after the user

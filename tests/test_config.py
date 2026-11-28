@@ -153,6 +153,40 @@ class ConfigFile(unittest.TestCase):
                 Config().save()
 
 
+    def test_non_object_root_gives_defaults(self):
+        self.write([])
+        self.assertEqual(Config.load().mode, "unicode")
+
+    def test_method_names_cannot_be_overwritten(self):
+        self.write({"save": 1, "bogus": 2})
+        c = Config.load()
+        self.assertFalse(hasattr(c, "bogus"))
+        c.save()  # must still be the method, not the injected value
+
+    def test_wrong_typed_numbers_are_normalized(self):
+        self.write({"latency_ms": "20", "scroll_speed": "fast",
+                    "timbre": ["harp"], "prenatal_song": 7})
+        c = Config.load()
+        self.assertEqual(c.latency_ms, 20)
+        self.assertEqual(c.scroll_speed, 1.0)
+        self.assertEqual(c.timbre, "harp")
+        self.assertIsNone(c.prenatal_song)
+
+    def test_non_finite_numbers_fall_back_to_defaults(self):
+        # json accepts NaN/Infinity literals; int(nan) raises ValueError and
+        # int(inf) OverflowError - both used to crash Config.load() itself.
+        self.write({"latency_ms": float("nan")})
+        self.assertEqual(Config.load().latency_ms, 0)
+        self.write({"latency_ms": float("inf")})
+        self.assertEqual(Config.load().latency_ms, 0)
+        self.write({"scroll_speed": float("nan")})
+        self.assertEqual(Config.load().scroll_speed, 1.0)
+        self.write({"latency_ms": 10 ** 400})   # overflows float()
+        self.assertEqual(Config.load().latency_ms, 0)
+        self.write({"scroll_speed": 10 ** 400})
+        self.assertEqual(Config.load().scroll_speed, 1.0)
+
+
 class ConfigPath(unittest.TestCase):
     def test_windows_uses_appdata(self):
         with tempfile.TemporaryDirectory() as d:
@@ -179,21 +213,3 @@ class ConfigPath(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-    def test_non_object_root_gives_defaults(self):
-        self.write([])
-        self.assertEqual(Config.load().mode, "unicode")
-
-    def test_method_names_cannot_be_overwritten(self):
-        self.write({"save": 1, "bogus": 2})
-        c = Config.load()
-        self.assertFalse(hasattr(c, "bogus"))
-        c.save()  # must still be the method, not the injected value
-
-    def test_wrong_typed_numbers_are_normalized(self):
-        self.write({"latency_ms": "20", "scroll_speed": "fast",
-                    "timbre": ["harp"], "prenatal_song": 7})
-        c = Config.load()
-        self.assertEqual(c.latency_ms, 20)
-        self.assertEqual(c.scroll_speed, 1.0)
-        self.assertEqual(c.timbre, "harp")
-        self.assertIsNone(c.prenatal_song)

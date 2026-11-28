@@ -10,7 +10,11 @@ from ..ui import (center_text, draw_box, draw_button, draw_menu_row,
                   draw_search_field, draw_search_result_row, matches,
                   QUERY_MAX)
 
-REPEAT_TIMEOUT = 0.18  # auto-repeat debounce (legacy terminals have no key-up)
+# Auto-repeat debounce for the calibration screen on legacy terminals (no
+# key-up events). Above the common OS repeat delay (~0.25 s on Windows) so a
+# physical hold registers once; still well under the 0.6 s beat period, so
+# genuine on-beat taps are never swallowed.
+REPEAT_TIMEOUT = 0.3
 from .base import Screen
 from .. import songs
 
@@ -126,7 +130,12 @@ class RhythmMenuScreen(Screen):
             return
         self._pending_song = pack.id
         self._pending_pack = pack
-        ext.start_decode(pack.id)
+        if not ext.start_decode(pack.id):
+            # Another pack's decode holds the single slot; ours starts when
+            # it finishes (update's healing path fires it). Say so, or the
+            # silent wait is indistinguishable from a hang — and the loading
+            # overlay shows the OTHER pack's progress meanwhile.
+            self.notice = self.theme.t("rhythm.decode_queued")
 
     def _song_audio(self, sid: str):
         song = songs.SONGS[sid]
@@ -173,8 +182,8 @@ class RhythmMenuScreen(Screen):
             return
         # Healing: a decode request that neither finished nor errored is dead.
         active, _done, _total = ext.status()
-        if not active:
-            ext.start_decode(pack.id)
+        if not active and ext.start_decode(pack.id):
+            self.notice = ""  # the queued decode is finally running
 
     def exit(self) -> None:
         self._pending_song = None

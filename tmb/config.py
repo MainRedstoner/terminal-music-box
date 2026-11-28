@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass, field, asdict, fields
 from typing import Dict, List, Optional, Tuple
@@ -18,10 +19,17 @@ def _clamp(v: float, lo: float, hi: float) -> float:
 
 
 def _num(v, default: float) -> float:
+    """A finite float from `v`, or `default`.
+
+    json happily parses NaN/Infinity literals; float(huge int) overflows.
+    Converting the result afterwards (int(nan), int(inf)) would crash the
+    load itself, so non-finite values count as garbage here.
+    """
     try:
-        return float(v)
-    except (TypeError, ValueError):
+        f = float(v)
+    except (TypeError, ValueError, OverflowError):
         return default
+    return f if math.isfinite(f) else default
 
 
 def config_path() -> str:
