@@ -707,6 +707,30 @@ class RefreshCache(unittest.TestCase):
         self.assertTrue(self.lib.error("b"))
         self.assertIsNotNone(self.lib.get_pcm("a"))
 
+    def test_a_decode_finishing_after_a_replacement_stays_stale(self):
+        # refresh() recorded the replacement's signature while the old decode
+        # was still running: storing the old PCM back would poison the cache
+        # (the menu would see "ready" and play old audio on the new chart).
+        build_pack(self.tmp.name, sid="a", duration=1.0)
+        self.lib.refresh()
+        started = threading.Event()
+        release = threading.Event()
+
+        def fake_wav(src, sr):
+            started.set()
+            release.wait(5)
+            return array.array("h", [111, 222, 333])
+
+        with mock.patch.object(external, "_decode_wav", fake_wav):
+            self.lib.start_decode("a")
+            self.assertTrue(started.wait(5))
+            build_pack(self.tmp.name, sid="a", duration=2.0)
+            self.lib.refresh()
+            release.set()
+            self._wait_idle()
+        self.assertFalse(self.lib.is_ready("a"))
+        self.assertIsNone(self.lib.get_pcm("a"))
+
     def test_start_decode_refuses_while_another_decode_is_running(self):
         build_pack(self.tmp.name, name="a.tmbp", sid="a")
         build_pack(self.tmp.name, name="b.tmbp", sid="b")
@@ -740,3 +764,16 @@ class RefreshCache(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAS_FFMPEG, "ffmpeg required")
+class StreamRewind(unittest.TestCase):
+    """decode_audio(fileobj): a failed WAV fast path must rewind the stream
+    before handing it to ffmpeg, not feed it a headless copy."""
+
+    def test_rate_mismatch_stream_still_decodes_whole(self):
+        bio = io.BytesIO(wav_bytes(0.5, sr=22050))
+        pcm = external.decode_audio(bio, 44100, "audio.wav")
+        # 0.5 s resampled to 44100 Hz: without the rewind the copy started
+        # after the data-chunk header and ffmpeg decoded garbage.
+        self.assertAlmostEqual(len(pcm), 22050, delta=4410)
