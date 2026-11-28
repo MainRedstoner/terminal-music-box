@@ -65,5 +65,27 @@ class LabelFitting(unittest.TestCase):
         self.assertEqual(scr.cells[4][21][0], " ")
 
 
+try:
+    from tests.helpers import HeadlessCase
+except ImportError:
+    from helpers import HeadlessCase
+
+
+class QueryCap(HeadlessCase):
+    """The query cap bounds paste bursts: an unbounded query made every
+    keystroke quadratic over the whole query (matches, casefold, draw)."""
+
+    start_screen = "menu"
+
+    def test_a_paste_is_capped(self):
+        from tmb.ui import QUERY_MAX
+        self.app.navigate("timbre_select")
+        self.press("/")
+        for _ in range(300):
+            self.press("a")
+        self.assertEqual(len(self.screen.query), QUERY_MAX)
+        self.assertEqual(self.screen.query, "a" * QUERY_MAX)
+
+
 if __name__ == "__main__":
     unittest.main()

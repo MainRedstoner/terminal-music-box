@@ -8,6 +8,7 @@ import math
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -762,8 +763,57 @@ class RefreshCache(unittest.TestCase):
         self.assertEqual(self.lib.error("a"), "MemoryError")
 
 
-if __name__ == "__main__":
-    unittest.main()
+
+
+
+class Watchdog(unittest.TestCase):
+    """_reap_later: a decode must not hold the single slot on a stalled
+    ffmpeg - the watchdog kills the child at the deadline."""
+
+    def test_reap_later_kills_a_stuck_process(self):
+        proc = subprocess.Popen([sys.executable, "-c",
+                                 "import time; time.sleep(60)"])
+        self.addCleanup(proc.wait)
+        external._reap_later(proc, 0.5)
+        # poll() does not reflect the kill until the child is reaped.
+        rc = proc.wait(timeout=10)
+        self.assertIsNotNone(rc)
+        self.assertNotEqual(rc, 0)
+
+
+@unittest.skipUnless(HAS_FFMPEG, "ffmpeg required")
+class StderrDrain(unittest.TestCase):
+    """X2 regression: stderr is drained while stdout is read, so a chatty
+    ffmpeg (corrupt input prints one error per frame, megabytes of it) can
+    never fill the pipe and deadlock the decode thread."""
+
+    def test_a_chatty_corrupt_input_does_not_hang_the_decode(self):
+        # MPEG frame header + megabytes of garbage: well past the pipe
+        # buffer's capacity. Old code hung forever here; drained, it fails
+        # loudly in well under a second.
+        import random
+        # A seeded noise payload: an all-zero body would decode as "valid"
+        # silent MPEG frames, so real garbage is what floods stderr.
+        data = bytes([0xff, 0xfb, 0x90, 0x64]) + random.Random(0).randbytes(8 << 20)
+        result = {}
+
+        def run():
+            try:
+                pcm = external.decode_audio(data, 44100, "audio.mp3")
+                result["frames"] = len(pcm)
+            except external.PackError as e:
+                result["err"] = str(e)
+            except Exception as e:  # noqa: BLE001 - reported below
+                result["unexpected"] = repr(e)
+
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+        t.join(timeout=60)
+        self.assertFalse(t.is_alive(), "decode_audio hung on chatty stderr")
+        # It must end loudly or with nothing decoded - never "successfully"
+        # pretending garbage was music.
+        self.assertTrue("err" in result or result.get("frames") == 0,
+                        result)
 
 
 @unittest.skipUnless(HAS_FFMPEG, "ffmpeg required")
@@ -777,3 +827,5 @@ class StreamRewind(unittest.TestCase):
         # 0.5 s resampled to 44100 Hz: without the rewind the copy started
         # after the data-chunk header and ffmpeg decoded garbage.
         self.assertAlmostEqual(len(pcm), 22050, delta=4410)
+if __name__ == "__main__":
+    unittest.main()

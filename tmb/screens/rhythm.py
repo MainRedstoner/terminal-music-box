@@ -11,9 +11,13 @@ from ..ui import (center_text, draw_box, draw_button, draw_menu_row,
                   QUERY_MAX)
 
 # Auto-repeat debounce for the calibration screen on legacy terminals (no
-# key-up events). Above the common OS repeat delay (~0.25 s on Windows) so a
-# physical hold registers once; still well under the 0.6 s beat period, so
-# genuine on-beat taps are never swallowed.
+# key-up events: POSIX/macOS conventions; Windows and kitty report releases
+# and never reach this path). Below the 0.6 s beat period, so genuine taps
+# are never swallowed, but not above the OS repeat delay (0.5-0.66 s) —
+# raising it that far would eat real taps instead. A physical hold can
+# therefore still land ONE phantom sample (the first repeat, +0.5 s or so);
+# the median over 12 samples tolerates a single outlier, and the pre-debounce
+# behaviour was a dozen garbage samples.
 REPEAT_TIMEOUT = 0.3
 from .base import Screen
 from .. import songs
@@ -37,6 +41,7 @@ class RhythmMenuScreen(Screen):
         self._pending_song = None
         self._pending_pack = None
         self.notice = ""
+        self.notice_fg = C.red
         self.searching = False
         self.query = ""
         self.app.external.refresh()
@@ -115,6 +120,8 @@ class RhythmMenuScreen(Screen):
             # _pending_pack first and would start that pack when it decoded.
             self._pending_song = sid
             self._pending_pack = None
+            # A queued notice belonged to a pack; this choice replaces it.
+            self.notice = ""
             timbre, midis = self._song_audio(sid)
             self.audio.preload(timbre, midis)
             return
@@ -136,6 +143,7 @@ class RhythmMenuScreen(Screen):
             # silent wait is indistinguishable from a hang — and the loading
             # overlay shows the OTHER pack's progress meanwhile.
             self.notice = self.theme.t("rhythm.decode_queued")
+            self.notice_fg = C.cyan
 
     def _song_audio(self, sid: str):
         song = songs.SONGS[sid]
@@ -179,6 +187,7 @@ class RhythmMenuScreen(Screen):
             self._pending_song = None
             self._pending_pack = None
             self.notice = self.theme.t("rhythm.external_error", msg=err)
+            self.notice_fg = C.red
             return
         # Healing: a decode request that neither finished nor errored is dead.
         active, _done, _total = ext.status()
@@ -344,7 +353,7 @@ class RhythmMenuScreen(Screen):
             )
 
         if self.notice:
-            center_text(scr, h - 2, self.notice, C.red)
+            center_text(scr, h - 2, self.notice, self.notice_fg)
         else:
             center_text(scr, h - 2, th.t("rhythm.menu_hint"), C.dim)
 

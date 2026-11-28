@@ -233,10 +233,10 @@ def draw_loading_overlay(screen: Screen, theme: Theme, done: int,
     y = (h - bh) // 2
     draw_box(screen, x, y, bw, bh, theme, fg=C.cyan,
              title=theme.t("loading.title"), title_fg=C.yellow)
-    ratio = done / total if total else 1.0
+    ratio = min(1.0, done / total) if total else 1.0
     center_text(screen, y + 1, "%d%%" % round(ratio * 100), C.white, None, True)
     barw = max(4, bw - 6)
-    nfill = int(barw * ratio)
+    nfill = min(barw, int(barw * ratio))
     fill, empty = ("█", "░") if theme.is_unicode else ("#", "-")
     bx = x + (bw - barw) // 2
     screen.text(bx, y + 3, fill * nfill, C.cyan)

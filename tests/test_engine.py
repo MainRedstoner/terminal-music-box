@@ -589,8 +589,7 @@ class WavMixer(unittest.TestCase):
         self.assertLess(peak, int(0.75 * 32767))
 
 
-if __name__ == "__main__":
-    unittest.main()
+
 
 class StopCleanup(unittest.TestCase):
     """Stops must end clean: no full-scale burst after a fade completes
@@ -646,3 +645,5 @@ class StopCleanup(unittest.TestCase):
         self.assertAlmostEqual(post[3], atk[n + 3], delta=0.01)
         self.assertLess(abs(post[0] - pre[-1]), 0.15)
         self.assertGreater(peak(post[:64]), 0.01)    # and it still sounds
+if __name__ == "__main__":
+    unittest.main()

@@ -567,7 +567,12 @@ class AudioEngine:
             self._buffers(tid, m)
             with self._preload_lock:
                 if gen == self._preload_gen:
-                    self._preload_done += 1
+                    # Clamp: the key may already be cached (a cold press
+                    # rendered it inline mid-request, _store skipped it) —
+                    # counting it raw pushed done past total and the loading
+                    # popup over its box.
+                    self._preload_done = min(self._preload_done + 1,
+                                             self._preload_total)
 
     def _preload_parallel(self, tid: str, midis, gen: int) -> None:
         """Render the keys in worker processes, inserting as results land.
@@ -604,7 +609,10 @@ class AudioEngine:
             self._store(tid, m, nb)
             with self._preload_lock:
                 if gen == self._preload_gen:
-                    self._preload_done += 1
+                    # Clamp (see _preload_serial): an inline render can have
+                    # cached the key before this worker finished.
+                    self._preload_done = min(self._preload_done + 1,
+                                             self._preload_total)
 
     def preload_status(self) -> Tuple[bool, int, int]:
         """Return (active, rendered, total) for the latest preload request.

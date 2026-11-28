@@ -368,8 +368,7 @@ class RhythmPreloadGate(HeadlessCase):
         self.assertEqual(self.screen.song_id, "canon")
 
 
-if __name__ == "__main__":
-    unittest.main()
+
 
 try:
     from tests.test_external import ThreadedCase, build_pack
@@ -453,3 +452,5 @@ class PendingPackRace(ThreadedCase):
         # the menu must not navigate into it.
         self.assertEqual(self.app.current_name, "rhythm_menu")
         self.assertEqual(self.screen._pending_song, "fur_elise")
+if __name__ == "__main__":
+    unittest.main()

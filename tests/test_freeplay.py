@@ -838,8 +838,7 @@ class FreePlayColdKey(HeadlessCase):
         self.engine.preload.assert_called_once_with(self.cfg.timbre, PRELOAD_MIDIS)
 
 
-if __name__ == "__main__":
-    unittest.main()
+
 
 class OffscreenFreeze(HeadlessCase):
     """P1/P2/P3: leaving to a picker freezes the melody, opening the buffer
@@ -906,3 +905,5 @@ class OffscreenFreeze(HeadlessCase):
         # Canon locks the didgeridoo; the list must not highlight harp.
         self.assertEqual(self.app.current.index,
                          synth.ORDER.index(songs.SONGS["canon"].timbre))
+if __name__ == "__main__":
+    unittest.main()

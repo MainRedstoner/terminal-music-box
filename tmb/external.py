@@ -17,6 +17,7 @@ from __future__ import annotations
 import array
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -24,7 +25,6 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
 import wave
 import zipfile
 from typing import Dict, List, Optional, Tuple
@@ -57,10 +57,18 @@ def external_dir() -> str:
 
 
 def _num(v, default: float) -> float:
+    """A finite float from `v`, or `default`.
+
+    json accepts NaN/Infinity literals and float() overflows on huge ints;
+    int() over such a value would then crash the caller (start_decode,
+    PackPlayer.sync — the whole app dies from one manifest field), so
+    non-finite counts as garbage.
+    """
     try:
-        return float(v)
-    except (TypeError, ValueError):
+        f = float(v)
+    except (TypeError, ValueError, OverflowError):
         return default
+    return f if math.isfinite(f) else default
 
 
 def _sanitize_id(v, fallback: str) -> str:
@@ -635,55 +643,27 @@ class Library:
     def _decode_work(self, pack: Pack, gen: int) -> None:
         try:
             with zipfile.ZipFile(pack.path) as zf:
-                total_hint = int(pack.duration * self.sr) if pack.duration else 0
-
                 def progress(frames: int) -> None:
                     with self._lock:
                         if gen != self._gen:
                             return
                         self._done = frames
-                        if not self._total:
-                            self._total = max(total_hint, frames)
+                        # A duration shorter than the real audio must not
+                        # push the loading popup past 100%: grow the total
+                        # with the frames actually decoded instead.
+                        if frames > self._total:
+                            self._total = frames
 
                 name = pack.audio_name
-                pcm = None
-                if name.lower().endswith(".wav"):
-                    # The stdlib fast path streams the member through the
-                    # wave reader: the PCM array is the only full-size copy
-                    # (about 21 MB per 4-minute song), not member + readframes
-                    # copy + array peaking at 3-4x that.
-                    with zf.open(name) as src:
-                        pcm = _decode_wav(src, self.sr)
-                    if pcm is not None and progress:
-                        progress(len(pcm))
-                if pcm is None:
-                    if not shutil.which("ffmpeg"):
-                        raise PackError("ffmpeg not found; install it to play "
-                                        "this pack (sudo apt install ffmpeg)")
-                    # Open the member before creating the temp file: an
-                    # unreadable member (encrypted entry, unsupported
-                    # compression — read_pack never touches audio bytes) must
-                    # not leak the mkstemp fd on the way out.
-                    try:
-                        src = zf.open(name)
-                    except KeyError as e:
-                        raise PackError("audio member %r missing"
-                                        % name) from e
-                    # ffmpeg cannot read a zip member (and MP4 is not seekable
-                    # when piped): stream the member into a temp file chunk by
-                    # chunk instead of holding the whole blob in memory.
-                    fd, tmp = tempfile.mkstemp(
-                        suffix=os.path.splitext(name)[1] or ".bin")
-                    try:
-                        with os.fdopen(fd, "wb") as out:
-                            shutil.copyfileobj(src, out, READ_CHUNK)
-                        pcm = _decode_ffmpeg_file(tmp, self.sr, progress)
-                    finally:
-                        src.close()
-                        try:
-                            os.unlink(tmp)
-                        except OSError:
-                            pass
+                try:
+                    src = zf.open(name)
+                except KeyError as e:
+                    raise PackError("audio member %r missing" % name) from e
+                # The member streams through as a file object: the PCM array
+                # is the only full-size copy (about 21 MB per 4-minute song),
+                # not member + readframes copy + array peaking at 3-4x that.
+                with src:
+                    pcm = decode_audio(src, self.sr, name, progress)
             if not pcm:
                 raise PackError("audio decoded to silence")
             with self._lock:
