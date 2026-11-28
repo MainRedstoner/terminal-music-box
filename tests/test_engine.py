@@ -591,3 +591,58 @@ class WavMixer(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class StopCleanup(unittest.TestCase):
+    """Stops must end clean: no full-scale burst after a fade completes
+    mid-chunk (E1), a never-started scheduled note must not sound after a
+    stop (E2), and a key-up mid-attack must not step to steady[0] (E3)."""
+
+    def setUp(self):
+        self.eng = AudioEngine(backend=NullBackend(), realtime=False)
+
+    def test_a_fade_ending_mid_chunk_stays_silent_to_the_end(self):
+        # 120 ms at 44100 Hz = 5292 frames = 10.34 chunks: the ramp ends
+        # inside the 11th 512-frame chunk. Everything after the ramp in that
+        # chunk used to keep the buffer's own amplitude - a short full-scale
+        # burst at the end of every stop, pause and screen switch.
+        buf = array.array("f", [0.5] * 8192)
+        v = Voice([(buf, False)])
+        v.fade_out(5292)
+        chunks = [v.pull(512) for _ in range(11)]
+        self.assertTrue(v.done)
+        final = chunks[-1]
+        self.assertGreater(peak(final[:172]), 0.0)   # the ramp itself sounds
+        self.assertEqual(peak(final[172:]), 0.0)     # the tail is silence
+
+    def test_stop_all_cancels_a_note_that_has_not_started_yet(self):
+        # Notes are handed to the engine up to SCHEDULE_LOOKAHEAD early; a
+        # stop during that window used to let the note start afterwards and
+        # fade out audibly (120 ms of a note that should never have sounded).
+        self.eng.play_note("harp", 60, 0.5, delay=2000)
+        self.eng.stop_all(120.0)
+        self.assertEqual(self.eng.active(), 0)
+        self.assertEqual(len(self.eng._fading), 1)
+        v = self.eng._fading[0]
+        for _ in range(6):
+            self.assertEqual(peak(v.pull(512)), 0.0)
+        self.assertTrue(v.done)
+
+    def test_key_up_during_the_attack_splices_the_attack_into_the_tail(self):
+        # Flute's attack runs ~61 ms; a key-up inside it used to jump from
+        # the attack's current phase straight to steady[0] - a step of up to
+        # ~0.8 amplitude. The tail now continues the attack's own samples
+        # first, so the key-up sample is as smooth as the note itself.
+        vid = self.eng.note_on("flute", 60)
+        v = self.eng._voices[vid]
+        atk = v._segments[0][0]
+        self.assertGreater(len(atk), 512)
+        n = len(atk) // 2
+        pre = v.pull(n)
+        self.eng.note_off(vid)
+        post = v.pull(512)
+        # The tail's head is literally the attack's next samples (the release
+        # fade's head weight is ~1.0), so the step stays a natural one.
+        self.assertAlmostEqual(post[0], atk[n], delta=0.01)
+        self.assertAlmostEqual(post[3], atk[n + 3], delta=0.01)
+        self.assertLess(abs(post[0] - pre[-1]), 0.15)
+        self.assertGreater(peak(post[:64]), 0.01)    # and it still sounds

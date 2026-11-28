@@ -179,3 +179,21 @@ class ConfigPath(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+    def test_non_object_root_gives_defaults(self):
+        self.write([])
+        self.assertEqual(Config.load().mode, "unicode")
+
+    def test_method_names_cannot_be_overwritten(self):
+        self.write({"save": 1, "bogus": 2})
+        c = Config.load()
+        self.assertFalse(hasattr(c, "bogus"))
+        c.save()  # must still be the method, not the injected value
+
+    def test_wrong_typed_numbers_are_normalized(self):
+        self.write({"latency_ms": "20", "scroll_speed": "fast",
+                    "timbre": ["harp"], "prenatal_song": 7})
+        c = Config.load()
+        self.assertEqual(c.latency_ms, 20)
+        self.assertEqual(c.scroll_speed, 1.0)
+        self.assertEqual(c.timbre, "harp")
+        self.assertIsNone(c.prenatal_song)

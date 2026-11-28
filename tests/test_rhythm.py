@@ -370,3 +370,70 @@ class RhythmPreloadGate(HeadlessCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+try:
+    from tests.test_external import ThreadedCase, build_pack
+except ImportError:
+    from test_external import ThreadedCase, build_pack
+
+
+class CalibrationHolds(HeadlessCase):
+    """R1: one physical hold is one tap plus auto-repeat, not a bucket of
+    samples; the garbage median must never reach config.latency_ms."""
+
+    start_screen = "rhythm_calib"
+
+    def _hold(self, presses=14, dt=0.033):
+        for _ in range(presses):
+            self.term.key("j")          # key-down only, no release
+            self.app.step(dt)
+
+    def test_a_held_key_registers_one_tap_when_releases_exist(self):
+        self.run_until(lambda: self.screen.clock >= 0.3, dt=0.005)
+        self._hold()
+        self.assertEqual(len(self.screen.offsets), 1)
+        self.assertFalse(self.screen.done)
+
+    def test_legacy_terminals_debounce_a_hold(self):
+        self.run_until(lambda: self.screen.clock >= 0.3, dt=0.005)
+        with mock.patch.object(self.app, "release_events", return_value=False):
+            self._hold()
+        # No key-up events: every repeat lands inside the debounce window of
+        # the last registered tap, so one hold yields a couple of samples at
+        # most - not twelve, and the config is not overwritten.
+        self.assertLessEqual(len(self.screen.offsets), 3)
+        self.assertFalse(self.screen.done)
+        self.assertEqual(self.cfg.latency_ms, 0)
+
+
+class PendingPackRace(ThreadedCase):
+    """R2: a pack decoding from an earlier Enter must not win after the user
+    picks a built-in song."""
+
+    start_screen = "menu"
+
+    def setUp(self):
+        super().setUp()
+        build_pack(self.external_dir, name="slow.tmbp", sid="slow")
+        self.app.external.refresh()
+        self.engine.realtime = True
+        self.engine.is_preloaded = mock.Mock(return_value=False)
+        self.engine.preload = mock.Mock()
+        self.app.navigate("rhythm_menu")
+        self.app.step(0.016)
+
+    def test_a_builtin_choice_cancels_the_pending_pack(self):
+        for _ in range(4):
+            self.press("down")
+        self.press("enter")             # pack pending, its decode starts
+        self.assertEqual(self.screen._pending_pack.id, "slow")
+        self.press("up")
+        self.press("enter")             # fur_elise: cold built-in song
+        self.assertIsNone(self.screen._pending_pack)
+        self.assertEqual(self.screen._pending_song, "fur_elise")
+        self.step_until(lambda: not self.app.external.status()[0], timeout=10)
+        self.steps(10)
+        # The decode finished, but the pack is no longer the user's choice:
+        # the menu must not navigate into it.
+        self.assertEqual(self.app.current_name, "rhythm_menu")
+        self.assertEqual(self.screen._pending_song, "fur_elise")
