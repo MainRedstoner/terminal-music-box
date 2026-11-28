@@ -241,25 +241,30 @@ class FreePlay(HeadlessCase):
         self.assertIs(self.screen.player, p)
         self.assertEqual(p.timbre, self.cfg.timbre)
 
-    def test_prenatal_plays_the_song_locked_timbre(self):
-        # Same score, same locked timbre as the rhythm game: Canon keeps its
-        # didgeridoo even though free play is set to the harp. The header must
-        # name the timbre that is actually sounding.
+    def test_prenatal_keeps_the_free_play_timbre(self):
+        # Toggling prenatal mode must not switch the timbre: Canon plays on
+        # the harp free play is set to, not on the rhythm game's didgeridoo,
+        # and the header keeps naming the one that actually sounds.
         self.cfg.timbre = "harp"
         self.cfg.prenatal_song = "canon"
         self.press("ctrl+t")
-        self.assertEqual(self.screen.player.timbre, "didgeridoo")
-        self.assertIn(synth.timbre_name("didgeridoo", "zh"), self.frame)
-        self.assertNotIn(synth.timbre_name("harp", "zh"), self.frame)
-
-    def test_prenatal_song_change_follows_the_new_locked_timbre(self):
+        self.assertEqual(self.screen.player.timbre, "harp")
+        self.assertIn(synth.timbre_name("harp", "zh"), self.frame)
+        self.assertNotIn(synth.timbre_name("didgeridoo", "zh"), self.frame)
+        # Turning it off leaves the selection exactly as it was.
         self.press("ctrl+t")
-        self.assertEqual(self.screen.player.timbre, "didgeridoo")
+        self.assertIsNone(self.screen.player)
+        self.assertEqual(self.cfg.timbre, "harp")
+
+    def test_prenatal_song_change_keeps_the_free_play_timbre(self):
+        self.cfg.timbre = "harp"
+        self.press("ctrl+t")
+        self.assertEqual(self.screen.player.timbre, "harp")
         self.press("ctrl+a")
         self.press("down")  # canon -> minuet_g
         self.press("enter")
         self.assertEqual(self.screen.player.song.id, "minuet_g")
-        self.assertEqual(self.screen.player.timbre, "pling")
+        self.assertEqual(self.screen.player.timbre, "harp")
 
     def test_prenatal_pauses_after_the_activity_window(self):
         self.press("ctrl+t")
@@ -516,9 +521,9 @@ class PrenatalPreload(HeadlessCase):
         self.assertTrue(self.screen._waiting)
         self.assertFalse(p.playing)
         tid, midis = self.requested()
-        # Prenatal auto-play carries the song's locked timbre, exactly like
-        # the rhythm game, so the same score sounds the same on both screens.
-        self.assertEqual(tid, songs.SONGS["fur_elise"].timbre)
+        # The melody pre-renders on the free-play timbre: prenatal mode does
+        # not carry a per-song one, so toggling it never switches the sound.
+        self.assertEqual(tid, self.cfg.timbre)
         self.assertLessEqual(set(songs.SONGS["fur_elise"].pitches), set(midis))
 
     def test_playback_starts_at_the_top_once_the_buffers_land(self):
@@ -542,7 +547,7 @@ class PrenatalPreload(HeadlessCase):
                 self.cfg.prenatal_song = sid
                 self.press("ctrl+t")
                 tid, midis = self.requested()
-                self.assertEqual(tid, songs.SONGS[sid].timbre)
+                self.assertEqual(tid, self.cfg.timbre)
                 self.assertEqual(self.screen.player.song.id, sid)
                 # The song's complete score, not just the 21 keyboard keys.
                 self.assertLessEqual(set(songs.SONGS[sid].pitches), set(midis))
@@ -553,8 +558,8 @@ class PrenatalPreload(HeadlessCase):
         self.cfg.prenatal_song = "canon"
         self.press("ctrl+t")
         tid, midis = self.requested()
-        # Prenatal locks the song's timbre, like the rhythm game does.
-        self.assertEqual(tid, songs.SONGS["canon"].timbre or self.cfg.timbre)
+        # Prenatal renders on the free-play timbre, not on a song-locked one.
+        self.assertEqual(tid, self.cfg.timbre)
         # The request holds the whole score and the keyboard keys after it.
         self.assertLessEqual(set(songs.SONGS["canon"].pitches), set(midis))
         self.assertLessEqual(set(PRELOAD_MIDIS), set(midis))
@@ -571,7 +576,7 @@ class PrenatalPreload(HeadlessCase):
         p = self.screen.player
         self.assertEqual(p.song.id, songs.RHYTHM_ORDER[0])
         tid, midis = self.requested()
-        self.assertEqual(tid, songs.SONGS[songs.RHYTHM_ORDER[0]].timbre)
+        self.assertEqual(tid, self.cfg.timbre)
         self.assertLessEqual(set(p.song.pitches), set(midis))
 
     def test_switching_timbre_mid_song_reloads_and_resumes_in_place(self):
@@ -590,10 +595,9 @@ class PrenatalPreload(HeadlessCase):
         self.engine.preload_status.return_value = (True, 0, 8)
         cycle_timbre(self)
         self.assertEqual(p.timbre, self.cfg.timbre)
-        # ^X highlights the timbre that actually sounds (the song's locked
-        # one), so cycling applies its neighbour in synth.ORDER - whatever
-        # entry that is, it is no longer the locked timbre itself.
-        self.assertNotEqual(p.timbre, songs.SONGS["canon"].timbre)
+        # ^X highlights the timbre that is sounding (the free-play one), so
+        # cycling applies its neighbour in synth.ORDER: harp -> bit.
+        self.assertEqual(p.timbre, "bit")
         self.assertTrue(self.screen._waiting)
         self.assertFalse(p.playing)
         self.assertGreaterEqual(p.pos, pos)  # parked mid-phrase, not rewound
@@ -620,7 +624,7 @@ class PrenatalPreload(HeadlessCase):
         self.assertTrue(self.screen._waiting)
         self.assertFalse(p.playing)
         tid, midis = self.requested()
-        self.assertEqual(tid, songs.SONGS[songs.RHYTHM_ORDER[0]].timbre)
+        self.assertEqual(tid, self.cfg.timbre)
         self.assertLessEqual(set(p.song.pitches), set(midis))
 
     def test_a_superseded_request_is_reissued(self):
@@ -907,13 +911,14 @@ class OffscreenFreeze(HeadlessCase):
         self.assertFalse(self.screen._waiting)
         self.assertTrue(p.playing)
 
-    def test_the_timbre_picker_highlights_the_song_locked_timbre(self):
+    def test_the_timbre_picker_highlights_the_free_play_timbre(self):
+        self.cfg.timbre = "bell"
         self._start_prenatal("canon")
         self.press("ctrl+x")
         self.assertEqual(self.app.current_name, "timbre_select")
-        # Canon locks the didgeridoo; the list must not highlight harp.
-        self.assertEqual(self.app.current.index,
-                         synth.ORDER.index(songs.SONGS["canon"].timbre))
+        # The melody sounds on the free-play timbre, so that one is
+        # highlighted — not Canon's rhythm-game didgeridoo.
+        self.assertEqual(self.app.current.index, synth.ORDER.index("bell"))
 
 
 if __name__ == "__main__":

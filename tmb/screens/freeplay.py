@@ -245,14 +245,12 @@ class FreePlayScreen(Screen):
         return LEN_RANGE[1] if synth.get_timbre(tid).sustain else 1.0
 
     def _active_timbre(self) -> str:
-        """The timbre that actually sounds right now.
+        """The timbre free play is set to — the one the melody plays as well.
 
-        While prenatal mode runs this is the player's timbre — the song's
-        locked one, or the user's pick after ^X. The sound strip must edit
-        and display that same timbre, not the free-play one sitting in the
-        config while the melody plays something else.
+        The player is built from config.timbre (see _start_player) and ^X
+        updates both, so prenatal mode never carries a timbre of its own.
         """
-        return self.player.timbre if self.player is not None else self.config.timbre
+        return self.config.timbre
 
     def _adjust(self, sign: int) -> None:
         """Step the focused sound value of the current timbre."""
@@ -290,11 +288,12 @@ class FreePlayScreen(Screen):
         if sid not in songs.RHYTHM_ORDER:
             sid = songs.RHYTHM_ORDER[0]
         song = songs.get_song(sid)
-        # The rhythm game locks each song's timbre (Canon's didgeridoo, the
-        # piano pieces' electric piano) and so does prenatal auto-play: the
-        # same score must sound the same. The user's own timbre applies when
-        # the song is not charted; ^X overrides it until the song changes.
-        tid = song.timbre or self.config.timbre
+        # The melody sounds on whatever timbre free play is set to. Locking it
+        # to the rhythm game's per-song timbre made entering and leaving
+        # prenatal mode switch the user's timbre (header and sound strip
+        # included); the toggle must leave that selection alone. The rhythm
+        # screen keeps its own lock — see rhythm_game.py.
+        tid = self.config.timbre
         vol, length = self.config.sound_params(tid)
         self.player = songs.SongPlayer(self.audio, song, tid,
                                        vol=vol, length=length)
