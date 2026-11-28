@@ -123,7 +123,21 @@ class Voice:
         self._release_tau = release_tau
 
     def fade_out(self, samples: int) -> None:
-        """Mark the voice to ramp to silence over `samples` frames."""
+        """Mark the voice to ramp to silence over `samples` frames.
+
+        A voice still inside its scheduled silent lead-in has not produced a
+        sample yet: ramping it would *start* the note after the stop and fade
+        it out audibly. Cancel it outright instead.
+        """
+        if self._delay > 0:
+            self._delay = 0
+            self._fade_total = 0
+            self._fade_left = 0
+            self.done = True
+            # Empty the body too: the mixer still pulls this voice once, and
+            # pull() fills whatever segments remain regardless of `done`.
+            self._segments = []
+            return
         if self._fade_left > 0:
             return
         self._fade_total = max(1, samples)
@@ -142,12 +156,25 @@ class Voice:
             return
         seg = self._steady
         if seg is not None and len(seg):
-            # Continue from the current loop phase so the tail is click-free.
-            pos = self._loop_pos % len(seg)
-            rot = seg[pos:] + seg[:pos]
             rn = len(self._release) if self._release is not None and len(self._release) else int(SR * 0.15)
             tail = zeros(rn)
             i = 0
+            mid_attack = (self._idx == 0 and self._pos > 0
+                          and len(self._segments) > 1)
+            if mid_attack:
+                # Key-up during the attack: _loop_pos never advanced, so a
+                # tail cut from steady would start at steady[0] against the
+                # attack's arbitrary phase — a hard step at the key-up
+                # sample. The click-free continuation is the attack's own
+                # remaining samples, then the steady loop from its phase 0:
+                # exactly what the note would have played anyway.
+                atk = self._segments[0][0]
+                take = min(len(atk) - self._pos, rn)
+                tail[0:take] = atk[self._pos:self._pos + take]
+                i = take
+            # Continue from the current loop phase so the tail is click-free.
+            pos = 0 if mid_attack else self._loop_pos % len(seg)
+            rot = seg[pos:] + seg[:pos]
             while i < rn:
                 take = min(len(rot), rn - i)
                 tail[i:i + take] = rot[:take]
@@ -223,6 +250,12 @@ class Voice:
                 out[lead + i] *= 0.5 + 0.5 * math.cos(math.pi * (played + i + 1) / self._fade_total)
             self._fade_left -= take
             if self._fade_left <= 0:
+                # The ramp hit zero mid-chunk: everything after it in this
+                # chunk used to play at full amplitude — every stop, pause or
+                # screen switch ended on a short full-scale burst (the fade
+                # branch only scales `take` frames of the chunk).
+                for i in range(lead + take, n):
+                    out[i] = 0.0
                 self.done = True
         return out
 
