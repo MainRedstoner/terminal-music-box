@@ -16,9 +16,11 @@ Implements [issue #1 — software development plan](https://github.com/MainRedst
 - **Free Play** — a three-octave keyboard played with the letter keys, with all
   13 melodic Minecraft 1.20 note-block timbres (percussion excluded), synthesized
   procedurally at runtime (no sample files).
-- **Prenatal mode** — gentle auto-played melodies that keep playing only while you
-  press a play key within a 2-second window; otherwise they pause. While it is on,
-  the play keys are muted (only the auto-play sounds) and the song button appears.
+- **Prenatal mode** — gentle auto-played melodies that keep playing while a play
+  key is held (and for 2 seconds after the last one is released); otherwise they
+  pause. While it is on, the play keys are muted (only the auto-play sounds) and
+  the song button appears; when the melody ends, a 5-second rest leaves the play
+  keys deaf and then the mode turns itself off.
 - **Rhythm Game** — vertically falling notes, a judgment line,
   Perfect / Good / Miss judgment with effects, live score & combo, latency
   calibration, and rebindable keys. The song list is grouped into
@@ -98,13 +100,17 @@ Z X C V B N M   — low   (C3..B3)
 Turning it on — or changing its song — does not start the melody by itself:
 press **any** play key to begin. From then on the play keys become a silent
 accompaniment: they still light up and keep the music going, but make no sound.
-**2 seconds** without a play key pauses it; the next key press resumes it. The
+**2 seconds** without a play key held pauses it; the next key press resumes it,
+and a key held down counts as ongoing activity even after another key was
+pressed and released on top of it. The
 **Song button** shows only while prenatal mode is on, and `^A` responds only
 then. The choice is limited to the rhythm game's four songs (defaults to
 Canon in C). Timbres are locked per song exactly as in the rhythm game — the
 didgeridoo for Canon, the electric piano for the other three — so long notes
 sound exactly as they do there; `^X` still overrides one temporarily, and the
-volume/length strip follows the timbre that is actually sounding. Songs loop.
+volume/length strip follows the timbre that is actually sounding. When the song
+ends it stops and rests for **5 seconds**: the play keys are deaf for those 5
+seconds, then prenatal mode turns itself off instead of looping.
 The melody follows the audio output clock, so its
 notes land on exact samples regardless of frame rate or a stalled frame.
 

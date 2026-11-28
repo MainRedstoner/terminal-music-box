@@ -1,6 +1,7 @@
 """Free play: 21-key C-major keyboard, timbre picker, prenatal mode."""
 from __future__ import annotations
 
+import math
 from typing import Dict, List, Optional, Tuple
 
 from ..ansi import Screen as Buffer, C, text_width
@@ -29,6 +30,7 @@ PRELOAD_MIDIS = sorted(set(KEY_MIDI.values()))
 
 REPEAT_TIMEOUT = 0.2   # auto-repeat debounce: legacy terminals have no key-up
 ACTIVITY_WINDOW = 2.0
+FINISH_REST = 5.0      # after the last note: deaf to play keys, then mode off
 WAIT_TIMEOUT = 60.0    # a wedged preload must not silence prenatal mode forever
 NOTE_DUR = 1.0
 VOL_STEP = 0.1
@@ -67,6 +69,10 @@ class FreePlayScreen(Screen):
         # changed — stays silent until the user presses a play key; only that
         # same key press that keeps prenatal playback alive may start it.
         self._silent = False
+        # When the melody reached its end: prenatal mode is resting (deaf to
+        # play keys) for FINISH_REST seconds, then turns itself off instead
+        # of looping the song.
+        self._finished_at: Optional[float] = None
 
     def enter(self, **kw) -> None:
         # Coming back from the song/timbre picker keeps the session exactly
@@ -102,6 +108,7 @@ class FreePlayScreen(Screen):
         self.prenatal = False
         self._waiting = False
         self._silent = False
+        self._finished_at = None
         self.audio.stop_all()
 
     # Input -------------------------------------------------------------------
@@ -136,6 +143,8 @@ class FreePlayScreen(Screen):
             self._mouse_key = None
 
     def _mouse_press(self, key: str) -> None:
+        if self._finished_at is not None:
+            return  # the rest after the last note is deaf (see _press)
         self._mouse_key = key
         self._press(key)
 
@@ -143,6 +152,10 @@ class FreePlayScreen(Screen):
         self.app.navigate("menu")
 
     def _press(self, key: str) -> None:
+        if self._finished_at is not None:
+            # The song is over and its rest deafens every play key, so a
+            # stray key (or a click on a cap) cannot restart the melody.
+            return
         self.last_activity = self.clock
         self.last_event[key] = self.clock
         if self.player is not None:
@@ -217,8 +230,10 @@ class FreePlayScreen(Screen):
         if self.player is not None:
             # The melody is about to continue on a timbre whose buffers do not
             # exist yet: re-render the whole song before letting it resume.
+            # A finished one has nothing left to play, so skip that pass.
             self.player.set_timbre(tid)
-            self._begin_playback()
+            if not self.player.finished:
+                self._begin_playback()
         else:
             self.audio.preload(tid, PRELOAD_MIDIS)  # no stall on the first press
 
@@ -257,11 +272,17 @@ class FreePlayScreen(Screen):
             self._start_player(self.config.prenatal_song)
             self.prenatal = True
         else:
+            self._stop_prenatal()
+
+    def _stop_prenatal(self) -> None:
+        """Turn prenatal mode off: the ^T toggle, or the rest after the end."""
+        if self.player is not None:
             self.player.stop()
             self.player = None
-            self.prenatal = False
-            self._waiting = False
-            self._silent = False
+        self.prenatal = False
+        self._waiting = False
+        self._silent = False
+        self._finished_at = None
 
     def _start_player(self, sid: Optional[str]) -> None:
         # Prenatal mode only offers the rhythm game's songs; an unset or stale
@@ -310,6 +331,7 @@ class FreePlayScreen(Screen):
         if restart:
             p.start()
             self.last_activity = self.clock
+            self._finished_at = None
         if self._ensure_buffers(force=True):
             self._waiting = False
             return
@@ -389,15 +411,33 @@ class FreePlayScreen(Screen):
                     # itself still waits for the user's play key below.
                     self._waiting = False
             if not self._waiting:
-                if self._silent or self.clock - self.last_activity > ACTIVITY_WINDOW:
-                    p.pause()
-                else:
-                    p.resume()
-                p.update(dt)
                 if p.finished:
-                    # The loop restarts from a cold cache if another screen
-                    # evicted these buffers meanwhile: gate it like a start.
-                    self._begin_playback(restart=True)
+                    # The song is over: rest for FINISH_REST with the play
+                    # keys deaf (see _press), then leave prenatal mode rather
+                    # than looping the melody forever. The screen clock, not
+                    # the audio clock, times the rest, so it does not run
+                    # while another screen (the pickers) is up.
+                    if self._finished_at is None:
+                        self._finished_at = self.clock
+                    elif self.clock - self._finished_at >= FINISH_REST:
+                        self._stop_prenatal()
+                else:
+                    if self.key_down:
+                        # A key still down is ongoing activity. Auto-repeat
+                        # only follows the most recently pressed key, so a
+                        # key held underneath a newer one stops reporting
+                        # while it is still down (the same trap held notes
+                        # hit — see _release). Without this the idle pause
+                        # started 2 s after the newer key was released, even
+                        # though a finger was still on the keyboard.
+                        self.last_activity = self.clock
+                    if self._silent or self.clock - self.last_activity > ACTIVITY_WINDOW:
+                        p.pause()
+                    else:
+                        p.resume()
+                    p.update(dt)
+                    if p.finished:
+                        self._finished_at = self.clock
 
     # Drawing -----------------------------------------------------------------
 
@@ -435,7 +475,9 @@ class FreePlayScreen(Screen):
         if self.player is not None:
             lines.append((th.t("freeplay.prenatal_song",
                                title=self.player.song.title(th.lang)), C.green, False))
-            lines.append((th.t("freeplay.prenatal_hint"), C.dim, False))
+            hint = ("freeplay.prenatal_finished_hint"
+                    if self._finished_at is not None else "freeplay.prenatal_hint")
+            lines.append((th.t(hint), C.dim, False))
         else:
             lines.append((th.t("freeplay.prenatal_off"), C.gray, False))
         return lines
@@ -571,6 +613,13 @@ class FreePlayScreen(Screen):
         if p is None or not (0 <= y < scr.h):
             return
         th = self.theme
+        if self._finished_at is not None:
+            # The rest after the last note: count it down so the deaf play
+            # keys do not look like a frozen screen.
+            left = int(math.ceil(FINISH_REST - (self.clock - self._finished_at)))
+            center_text(scr, y, th.t("freeplay.prenatal_finished", sec=max(1, left)),
+                        C.yellow)
+            return
         barw = max(6, min(24, scr.w - 18))
         fill = max(0, min(barw, int(round(p.progress * barw))))
         fc, ec = ("█", "░") if th.is_unicode else ("#", "-")

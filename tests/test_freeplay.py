@@ -7,8 +7,8 @@ from unittest import mock
 from tmb import songs
 from tmb.audio import synth
 from tmb.events import KeyEvent
-from tmb.screens.freeplay import (ACTIVITY_WINDOW, KEY_MIDI, PRELOAD_MIDIS,
-                                  REPEAT_TIMEOUT, WAIT_TIMEOUT)
+from tmb.screens.freeplay import (ACTIVITY_WINDOW, FINISH_REST, KEY_MIDI,
+                                  PRELOAD_MIDIS, REPEAT_TIMEOUT, WAIT_TIMEOUT)
 
 try:
     from tests.helpers import HeadlessCase, has_cjk
@@ -264,7 +264,7 @@ class FreePlay(HeadlessCase):
     def test_prenatal_pauses_after_the_activity_window(self):
         self.press("ctrl+t")
         p = self.screen.player
-        self.press("q")  # the melody starts silent; a play key starts it
+        self.tap("q")  # the melody starts silent; a real tap starts it
         self.step()
         self.assertTrue(p.playing)
         self.advance(ACTIVITY_WINDOW + 0.1, dt=0.05)
@@ -276,7 +276,7 @@ class FreePlay(HeadlessCase):
     def test_prenatal_resumes_on_a_play_key(self):
         self.press("ctrl+t")
         p = self.screen.player
-        self.press("q")  # the melody starts silent; a play key starts it
+        self.tap("q")  # the melody starts silent; a real tap starts it
         self.step()
         self.advance(ACTIVITY_WINDOW + 0.1, dt=0.05)
         self.assertFalse(p.playing)
@@ -288,6 +288,26 @@ class FreePlay(HeadlessCase):
         pos = p.pos
         self.advance(0.5)
         self.assertGreater(p.pos, pos)
+
+    def test_prenatal_keeps_playing_while_a_key_is_held(self):
+        # Auto-repeat follows only the newest key, so the key held underneath
+        # one goes quiet while it is still down. With real key-up events that
+        # silence must not read as "released": holding a key is ongoing
+        # activity, and the melody used to pause 2 s after the newer key let
+        # go even though a finger was still on the keyboard.
+        self.press("ctrl+t")
+        p = self.screen.player
+        self.press("a")            # A goes down and stays down
+        self.step()
+        self.assertTrue(p.playing)
+        self.press("s")
+        self.release("s")          # the newer key is gone; A is still held
+        self.advance(ACTIVITY_WINDOW + 1.0, dt=0.05)
+        self.assertTrue(p.playing)
+        self.assertGreater(p.pos, ACTIVITY_WINDOW)
+        self.release("a")
+        self.advance(ACTIVITY_WINDOW + 0.2, dt=0.05)
+        self.assertFalse(p.playing)
 
     def test_prenatal_keeps_playing_while_keys_are_pressed(self):
         self.press("ctrl+t")
@@ -309,27 +329,41 @@ class FreePlay(HeadlessCase):
         # only the auto-played song note exists; neither key press made a sound
         self.assertEqual(self.engine.active(), 1)
 
-    def test_prenatal_song_loops_after_it_finishes(self):
+    def _tiny_song(self, p):
+        """Give the player a two-note score so its end is cheap to reach."""
+        p.song = songs.Song("tiny", "小曲", "Tiny", 120.0,
+                            [songs.Note(0.0, 60, 0.1),
+                             songs.Note(0.2, 62, 0.1)])
+        self.screen._silent = False
+        self.screen.last_activity = self.screen.clock
+        p.start()
+
+    def test_the_song_end_rests_deaf_then_leaves_prenatal_mode(self):
         self.press("ctrl+t")
         p = self.screen.player
-        duration = p.song.duration
-        prev = 0.0
-        wrapped = False
-        rf = self.app.render_frames
-        self.app.render_frames = False
-        try:
-            for i in range(int((duration + 3.0) / 0.05)):
-                self.step(0.05)
-                if i % 10 == 0:
-                    self.term.key("q")
-                if p.pos < prev - 1.0:
-                    wrapped = True
-                prev = p.pos
-        finally:
-            self.app.render_frames = rf
-        self.assertTrue(wrapped)
-        self.assertTrue(p.playing)
-        self.assertLess(p.pos, duration)
+        self._tiny_song(p)
+        self.advance(0.4, dt=0.05)
+        self.assertTrue(p.finished)
+        self.assertFalse(p.playing)
+        # Still in prenatal mode, but resting: the countdown line and the
+        # deaf-keys hint explain why the play keys do nothing.
+        th = self.app.theme
+        self.assertIn(th.t("freeplay.prenatal_finished_hint"), self.frame)
+        self.assertIs(self.screen.player, p)
+        self.press("q")                    # a play key inside the rest
+        self.step()
+        self.assertTrue(p.finished)
+        self.assertFalse(self.screen.key_down)
+        self.assertIs(self.screen.player, p)
+        self.advance(FINISH_REST - 1.0, dt=0.05)
+        self.assertIs(self.screen.player, p)  # the rest is not over yet
+        self.advance(1.2, dt=0.05)
+        self.assertIsNone(self.screen.player)  # left prenatal mode on its own
+        self.assertFalse(self.screen.prenatal)
+        self.assertEqual(self.engine.active(), 0)
+        # Plain free play owns the keys again.
+        self.press("q")
+        self.assertEqual(self.engine.active(), 1)
 
     def test_ctrl_a_opens_song_select_and_keeps_the_player(self):
         self.press("ctrl+t")
@@ -588,32 +622,6 @@ class PrenatalPreload(HeadlessCase):
         tid, midis = self.requested()
         self.assertEqual(tid, songs.SONGS[songs.RHYTHM_ORDER[0]].timbre)
         self.assertLessEqual(set(p.song.pitches), set(midis))
-
-    def test_song_loop_regates_a_cold_cache(self):
-        self.engine.is_preloaded.return_value = True
-        self.cfg.prenatal_song = "minuet_g"
-        self.press("ctrl+t")
-        p = self.screen.player
-        duration = p.song.duration
-        flipped = False
-        for _ in range(int((duration + 2.0) / 0.05)):
-            if not flipped and p.pos > duration - 0.3:
-                # Something (the rhythm game, a timbre switch) evicted the
-                # buffers while the song was playing: the loop must not start
-                # cold again.
-                self.engine.preload.reset_mock()
-                self.engine.is_preloaded.return_value = False
-                self.engine.preload_status.return_value = (True, 0, 4)
-                flipped = True
-            self.step(0.05)
-            self.term.key("q")  # keep the 2 s activity window open
-            if self.screen._waiting:
-                break
-        self.assertTrue(flipped)
-        self.assertTrue(self.screen._waiting)
-        self.assertFalse(p.playing)
-        self.assertEqual(p.pos, 0.0)
-        self.engine.preload.assert_called()
 
     def test_a_superseded_request_is_reissued(self):
         self.cfg.prenatal_song = "fur_elise"
@@ -890,6 +898,7 @@ class OffscreenFreeze(HeadlessCase):
     def test_opening_the_gate_rearms_the_activity_window(self):
         p = self._start_prenatal()
         self.press("q")                 # asks for playback; the gate is shut
+        self.release("q")               # the request is a tap, not a hold
         # The gate's wait used to eat the 2 s activity window: opening it
         # paused the melody on that very frame, with nothing to re-arm it.
         self.screen.last_activity = self.screen.clock - 5.0
