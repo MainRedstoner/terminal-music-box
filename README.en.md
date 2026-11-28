@@ -194,6 +194,20 @@ outer two take only isolated long notes, no lane repeats on three consecutive
 onsets, and chords are mirrored across the middle; a fast right-hand passage lends
 one note to the left hand after six notes, so two fingers never machine-gun a run.
 
+**Dynamics** (强弱): the numeric scores accept a velocity per note (an optional
+extra element in `seq`/`timed` tuples), and `apply_dynamics` transcribes the
+markings of the source editions. The scores carry exactly what their sources
+notate: the Turkish March's Mutopia typeset ships a dedicated dynamics voice
+(p/mp/f/ff, crescendos, sforzandi) and auto-play follows it note by note;
+Für Elise is pp throughout per its source; the two Baroque pieces carry no
+dynamic markings at all, so they keep a uniform level. Both the rhythm game's
+auto-played melody and prenatal playback follow the score's dynamics; the
+auto-play additionally yields polyphony headroom (`SongPlayer.POLYPHONY_GAIN`)
+so soft passages never trigger the mixer's adaptive ducking and the dynamics
+pass through untouched — the limiter only steps in on the loudest tuttis
+(such as the closing chords), pinning the strongest written level to the
+peak ceiling.
+
 ## External Song Packs
 
 The rhythm game can load custom charts: a chart and its audio bundled into
