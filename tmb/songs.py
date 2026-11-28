@@ -1404,8 +1404,8 @@ _TURKISH_DYNAMICS = [
     (176.0, "f"),                     # A major: the chorale octaves again
     (194.0, "f"),                     # coda: held chord
     (206.0, "f"),                     # coda: strummed chords
-    (218.0, "f"),                     # coda: strummed chords
-    (232.0, "p"),                     # coda: soft echo chords
+    (218.0, "p"),                     # coda: soft echo arpeggios
+    (232.0, "f"),                     # coda: strummed chords to the close
     (250.0, "f"),                     # coda: closing chords
     (253.0, "ff"),                    # the final chords
 ]

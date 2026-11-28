@@ -195,6 +195,9 @@ class Library(unittest.TestCase):
         self.assertEqual(vel_at(16), {songs.DYNAMIC_LEVELS["mp"]})
         self.assertEqual(vel_at(48), {songs.DYNAMIC_LEVELS["f"]})
         self.assertEqual(vel_at(128), {songs.DYNAMIC_LEVELS["p"]})
+        # The coda's echo arpeggios soften before the closing chords.
+        self.assertEqual(vel_at(218), {songs.DYNAMIC_LEVELS["p"]})
+        self.assertEqual(vel_at(232), {songs.DYNAMIC_LEVELS["f"]})
         self.assertEqual(vel_at(254), {songs.DYNAMIC_LEVELS["ff"]})
         # A hairpin interpolates between the levels in force.
         inside = next(iter(vel_at(70)))
