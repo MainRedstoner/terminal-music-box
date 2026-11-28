@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import wave
 import zipfile
 from typing import Dict, List, Optional, Tuple
@@ -35,6 +36,11 @@ PACK_EXT = ".tmbp"
 FORMAT_VERSION = 1
 DEFAULT_LEAD_IN = 2.0
 READ_CHUNK = 1 << 16
+# Whole-process bound on one ffmpeg run. A stalled ffmpeg (alive, silent)
+# must not hold the single decode slot forever — killing it makes the stdout
+# read hit EOF and the failure path report normally. Desktops decode a
+# 4-minute song in well under a second; a Pi needs a few.
+DECODE_TIMEOUT = 300.0
 
 
 class PackError(Exception):
@@ -79,9 +85,10 @@ class Pack:
     """One parsed .tmbp file. Chart times are seconds from the audio start."""
 
     # Source-file signature (stat) recorded by read_pack; Library.refresh
-    # compares it to detect a same-id pack that was replaced on disk.
-    source_mtime = 0
-    source_size = 0
+    # compares it to detect a same-id pack that was replaced on disk. The
+    # inode/volume join catches same-size rewrites that mtime granularity
+    # (2 s on FAT32) would miss.
+    source_sig = (0, 0, 0, 0)
 
     def __init__(self, path: str, manifest: dict, notes: List[Tuple[float, int]]):
         self.path = path
@@ -165,7 +172,9 @@ def read_pack(path: str) -> Pack:
             # broken pack: only PackError is filtered upstream (Library
             # warnings, menu error notices), anything else escaping here
             # crashes the whole app the moment the rhythm menu opens.
-            raise PackError("corrupt member: %s" % e) from e
+            # str(MemoryError()) is "": keep the message non-empty.
+            raise PackError("corrupt member: %s"
+                            % (str(e) or type(e).__name__)) from e
 
 
 def _read_members(zf: zipfile.ZipFile, path: str) -> Pack:
@@ -192,8 +201,7 @@ def _read_members(zf: zipfile.ZipFile, path: str) -> Pack:
     pack = Pack(path, manifest, notes)
     try:
         st = os.stat(path)
-        pack.source_mtime = st.st_mtime_ns
-        pack.source_size = st.st_size
+        pack.source_sig = (st.st_mtime_ns, st.st_size, st.st_ino, st.st_dev)
     except OSError:
         pass
     return pack
@@ -222,6 +230,14 @@ def _decode_wav(src, sr: int) -> Optional[array.array]:
     if sys.byteorder == "big":
         pcm.byteswap()
     return pcm
+
+
+def _reap_later(proc: subprocess.Popen, seconds: float) -> None:
+    """Kill `proc` unless it exits within `seconds` (watchdog thread body)."""
+    try:
+        proc.wait(timeout=seconds)
+    except subprocess.TimeoutExpired:
+        proc.kill()
 
 
 def _decode_ffmpeg_file(path: str, sr: int, progress=None) -> array.array:
@@ -255,6 +271,15 @@ def _decode_ffmpeg_file(path: str, sr: int, progress=None) -> array.array:
         t = threading.Thread(target=_drain, name="tmb-ffmpeg-stderr",
                              daemon=True)
         t.start()
+        # A watchdog bounds the whole run. The stderr drain fixed the pipe
+        # deadlock, but an ffmpeg that stalls mid-input (alive, silent) would
+        # still block stdout.read() forever — and with the one-decode gate
+        # that wedged every pack until restart. Killing it makes the read hit
+        # EOF and the failure path report normally.
+        watchdog = threading.Thread(
+            target=_reap_later, args=(proc, DECODE_TIMEOUT),
+            name="tmb-ffmpeg-watchdog", daemon=True)
+        watchdog.start()
         try:
             pcm = array.array("h")
             pending = b""
@@ -311,6 +336,13 @@ def decode_audio(data, sr: int, name: str, progress=None) -> array.array:
             if progress:
                 progress(len(fast))
             return fast
+    if hasattr(data, "read") and hasattr(data, "seek"):
+        # The failed fast path consumed part of the stream (header probed,
+        # rate mismatch): rewind so ffmpeg sees the member from its start.
+        try:
+            data.seek(0)
+        except OSError:
+            pass
     if not shutil.which("ffmpeg"):
         raise PackError("ffmpeg not found; install it to play this pack "
                         "(sudo apt install ffmpeg)")
@@ -475,11 +507,11 @@ class Library:
         self._gen = 0
         self._done = 0
         self._total = 0
-        # refresh() cache: path -> ((mtime_ns, size), Pack). Re-parsing every
+        # refresh() cache: path -> (stat signature, Pack). Re-parsing every
         # .tmbp (zip + two JSON members + a full note list) ran synchronously
         # in the UI thread on every entry into the rhythm menu.
         self._pack_cache: Dict[str, tuple] = {}
-        # id -> (mtime_ns, size) of the pack each cached PCM/error came from;
+        # id -> stat signature of the pack each cached PCM/error came from;
         # a replaced or deleted file must invalidate its old audio.
         self._pack_meta: Dict[str, tuple] = {}
 
@@ -487,15 +519,20 @@ class Library:
         packs: List[Pack] = []
         warnings: List[str] = []
         seen: Dict[str, Pack] = {}
+        visited: set = set()
         cache = self._pack_cache
         if os.path.isdir(self.dir):
             for name in sorted(os.listdir(self.dir)):
                 if not name.lower().endswith(PACK_EXT):
                     continue
                 path = os.path.join(self.dir, name)
+                visited.add(path)
                 try:
                     st = os.stat(path)
-                    sig = (st.st_mtime_ns, st.st_size)
+                    # mtime+size alone miss a same-size rewrite within the
+                    # filesystem's timestamp granularity (2 s on FAT32);
+                    # the inode/volume join closes that window.
+                    sig = (st.st_mtime_ns, st.st_size, st.st_ino, st.st_dev)
                 except OSError:
                     sig = None
                 pack = None
@@ -517,6 +554,9 @@ class Library:
                     continue
                 seen[pack.id] = pack
                 packs.append(pack)
+        # A deleted or renamed file is never visited again; its parsed Pack
+        # would sit in the cache forever.
+        self._pack_cache = {p: v for p, v in cache.items() if p in visited}
         packs.sort(key=lambda p: p.title_zh)
         self.packs = packs
         self.warnings = warnings
@@ -524,7 +564,7 @@ class Library:
         # replacing a same-id .tmbp (or deleting it) must drop the old audio,
         # or the menu keeps seeing "ready" and the game plays stale PCM
         # against the new chart for the whole session.
-        live = {p.id: (p.source_mtime, p.source_size) for p in packs}
+        live = {p.id: p.source_sig for p in packs}
         stale = [sid for sid, meta in self._pack_meta.items()
                  if live.get(sid) != meta]
         if stale:
@@ -620,16 +660,26 @@ class Library:
                     if not shutil.which("ffmpeg"):
                         raise PackError("ffmpeg not found; install it to play "
                                         "this pack (sudo apt install ffmpeg)")
+                    # Open the member before creating the temp file: an
+                    # unreadable member (encrypted entry, unsupported
+                    # compression — read_pack never touches audio bytes) must
+                    # not leak the mkstemp fd on the way out.
+                    try:
+                        src = zf.open(name)
+                    except KeyError as e:
+                        raise PackError("audio member %r missing"
+                                        % name) from e
                     # ffmpeg cannot read a zip member (and MP4 is not seekable
                     # when piped): stream the member into a temp file chunk by
                     # chunk instead of holding the whole blob in memory.
                     fd, tmp = tempfile.mkstemp(
                         suffix=os.path.splitext(name)[1] or ".bin")
                     try:
-                        with zf.open(name) as src, os.fdopen(fd, "wb") as out:
+                        with os.fdopen(fd, "wb") as out:
                             shutil.copyfileobj(src, out, READ_CHUNK)
                         pcm = _decode_ffmpeg_file(tmp, self.sr, progress)
                     finally:
+                        src.close()
                         try:
                             os.unlink(tmp)
                         except OSError:
@@ -638,6 +688,19 @@ class Library:
                 raise PackError("audio decoded to silence")
             with self._lock:
                 if gen != self._gen:
+                    return
+                # The pack file may have been replaced (or deleted) while the
+                # decode ran: refresh() has already re-recorded the new
+                # signature for this id. Storing PCM decoded from the old
+                # bytes would poison the cache — the menu would see "ready"
+                # and play old audio against the new chart until restart.
+                try:
+                    st = os.stat(pack.path)
+                    fresh = (st.st_mtime_ns, st.st_size, st.st_ino,
+                             st.st_dev) == pack.source_sig
+                except OSError:
+                    fresh = False
+                if not fresh:
                     return
                 self._pcm[pack.id] = pcm
                 # One decoded song in RAM is enough for a 1 GB Pi — but only
