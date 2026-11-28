@@ -53,7 +53,7 @@ python main.py --no-kitty          # testing: skip the kitty keyboard protocol
 ```
 
 Settings (UI mode, timbre, rhythm keys, latency offset, prenatal song,
-per-timbre sound settings) persist to
+per-timbre sound settings, the ringing-hold switch) persist to
 `~/.config/terminal-music-box/config.json` (Linux) or
 `%APPDATA%/terminal-music-box/config.json` (Windows).
 
@@ -81,14 +81,19 @@ Z X C V B N M   — low   (C3..B3)
   timbres (flute, bit, didgeridoo) hold until key-up. Harp, bell and chime
   decay at the current length setting while held and speed up to their own
   release time constant (0.15–0.25 s) on key-up; other timbres stay
-  fixed-length one-shots, and holding never re-triggers a note. WSL (ConPTY)
-  stops delivering key releases on the alternate screen, so the app
-  automatically skips it there to keep key-up events flowing.
-- **Volume / length**: the strip below the keyboard — `↑/↓` switches between
-  volume and note length, `←/→` steps the current timbre's value (volume
-  0–2.0, length 0.25–4×; ringing timbres can only be shortened, which speeds
-  up their decay rather than cutting the tail). Changes apply instantly; bit
-  defaults to 0.25× length.
+  fixed-length one-shots, and holding never re-triggers a note. The
+  **Ringing hold** switch at the bottom of the strip covers only harp, bell
+  and chime: off restores their plain fixed-length one-shot (key-up no longer
+  cuts the tail short), while sustained timbres keep holding until key-up.
+  The choice is saved. WSL (ConPTY) stops delivering key releases on the
+  alternate screen, so the app automatically skips it there to keep key-up
+  events flowing.
+- **Volume / length / ringing hold**: the strip below the keyboard — `↑/↓`
+  cycles through volume, note length and the ringing-hold switch, `←/→` steps
+  the current timbre's value (volume 0–2.0, length 0.25–4×; ringing timbres
+  can only be shortened, which speeds up their decay rather than cutting the
+  tail) or flips the switch, which is clickable as well. Changes apply
+  instantly and are saved; bit defaults to 0.25× length.
 - `^T` — toggle prenatal mode.
 - `^A` — choose the prenatal song (only responds while prenatal mode is on);
   `/` inside the list searches by Chinese or English title, with both names

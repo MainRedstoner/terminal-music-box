@@ -697,14 +697,17 @@ class PrenatalPreload(HeadlessCase):
 
 
 class SoundStrip(HeadlessCase):
+    """Inline volume / length editors and the ringing-hold switch."""
+
     start_screen = "freeplay"
-    """Inline volume / length editors beside the keyboard."""
 
     def setUp(self):
         super().setUp()
         th = self.app.theme
         self.vol_label = th.t("freeplay.vol")
         self.len_label = th.t("freeplay.len")
+        self.hold_on = th.t("freeplay.hold", state=th.t("common.on"))
+        self.hold_off = th.t("freeplay.hold", state=th.t("common.off"))
 
     def test_strip_shows_both_values(self):
         self.assertIn(self.vol_label, self.frame)
@@ -712,11 +715,19 @@ class SoundStrip(HeadlessCase):
         self.assertIn("1.0", self.frame)
         self.assertIn("1.00×", self.frame)
 
-    def test_up_down_toggle_the_focus(self):
+    def test_strip_shows_the_hold_switch(self):
+        self.assertIn(self.hold_on, self.frame)
+        self.assertNotIn(self.hold_off, self.frame)
+
+    def test_up_down_cycle_through_the_three_rows(self):
         self.press("down")
         self.assertEqual(self.screen.focus, 1)
+        self.press("down")
+        self.assertEqual(self.screen.focus, 2)  # the hold switch
+        self.press("down")
+        self.assertEqual(self.screen.focus, 0)  # wraps around
         self.press("up")
-        self.assertEqual(self.screen.focus, 0)
+        self.assertEqual(self.screen.focus, 2)
         self.press("up")
         self.assertEqual(self.screen.focus, 1)
 
@@ -777,6 +788,62 @@ class SoundStrip(HeadlessCase):
         self.press("left")
         self.assertEqual(self.cfg.sound_params("harp")[1], 0.75)
 
+    def test_left_right_flip_the_hold_switch_and_persist_it(self):
+        self.press("down")
+        self.press("down")  # focus the ringing-hold switch
+        self.press("right")
+        self.assertFalse(self.cfg.ringing_hold)
+        self.assertIn(self.hold_off, self.frame)
+        self.assertFalse(self.read_config()["ringing_hold"])
+        self.press("left")
+        self.assertTrue(self.cfg.ringing_hold)
+        self.assertIn(self.hold_on, self.frame)
+        self.assertTrue(self.read_config()["ringing_hold"])
+
+    def test_mouse_click_toggles_the_hold_switch(self):
+        self.click_label(self.hold_on)
+        self.assertFalse(self.cfg.ringing_hold)
+        self.assertEqual(self.screen.focus, 2)
+        self.assertIn(self.hold_off, self.frame)
+
+    def test_hold_off_makes_ringing_timbres_one_shots(self):
+        self.press("down")
+        self.press("down")
+        self.press("left")  # switch the ringing hold off
+        self.assertFalse(self.cfg.ringing_hold)
+        self.press("a")
+        voice = next(iter(self.engine._voices.values()))
+        self.assertFalse(voice._sustain)
+        self.assertNotIn("a", self.screen.key_voice)  # no key-up release path
+        self.assertEqual([loop for _, loop in voice._segments], [False])
+        self.release("a")
+        self.assertEqual(self.engine.active(), 1)  # natural tail, not cut
+
+    def test_hold_off_keeps_sustained_timbres_holding(self):
+        # The switch only covers the ringing timbres added by the hold work:
+        # flute/bit/didgeridoo keep holding until key-up.
+        self.cfg.ringing_hold = False
+        self.cfg.timbre = "bit"
+        self.press("a")
+        voice = next(iter(self.engine._voices.values()))
+        self.assertTrue(voice._sustain)
+        self.assertIn("a", self.screen.key_voice)
+        self.release("a")
+        self.assertEqual(self.screen.key_down, {})
+        self.assertEqual(self.screen.key_voice, {})
+
+    def test_hold_on_again_restores_the_key_up_path(self):
+        self.cfg.ringing_hold = False
+        self.step()
+        self.click_label(self.hold_off)
+        self.assertTrue(self.cfg.ringing_hold)
+        self.press("a")
+        self.assertIn("a", self.screen.key_voice)
+        voice = next(iter(self.engine._voices.values()))
+        self.assertFalse(voice._sustain)
+        self.release("a")
+        self.assertLess(voice._decay, 1.0)  # key-up speeds the held decay up
+
 
 class FreePlayAscii(HeadlessCase):
     start_screen = "freeplay"
@@ -787,6 +854,7 @@ class FreePlayAscii(HeadlessCase):
         self.assertIn("Free Play", self.frame)
         self.assertIn("[A]", self.frame)
         self.assertIn("C4", self.frame)
+        self.assertIn("Ringing hold: ON", self.frame)
         self.assertIn("^Q/^D/^C/Esc back", self.frame)
 
     def test_ascii_timbre_button_click(self):

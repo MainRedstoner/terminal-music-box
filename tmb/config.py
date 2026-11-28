@@ -57,6 +57,11 @@ class Config:
     # per-timbre sound settings: {tid: {"vol": float, "len": float}}; a missing
     # entry means the natural defaults (vol 1.0, natural length).
     sound: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    # Key-held ringing notes (harp/bell/chime): on terminals with key-up
+    # events a held key decays at the length setting and speeds up to the
+    # timbre's release time constant on key-up. Off restores their plain
+    # fixed-length one-shot; sustained timbres keep holding either way.
+    ringing_hold: bool = True
 
     def sound_params(self, tid: str) -> Tuple[float, float]:
         d = self.sound.get(tid)
@@ -116,6 +121,10 @@ class Config:
         # the rhythm game's enter().
         cfg.latency_ms = int(_num(cfg.latency_ms, 0))
         cfg.scroll_speed = _clamp(_num(cfg.scroll_speed, 1.0), *SCROLL_RANGE)
+        if not isinstance(cfg.ringing_hold, bool):
+            # json only yields real bools; a hand-edited "false"/0 is not a
+            # switch value, so keep the feature on rather than guess.
+            cfg.ringing_hold = True
         if not isinstance(cfg.sound, dict):
             cfg.sound = {}
         cfg.sound = {str(k): dict(v) for k, v in cfg.sound.items()

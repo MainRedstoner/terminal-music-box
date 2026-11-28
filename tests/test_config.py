@@ -33,10 +33,12 @@ class ConfigFile(unittest.TestCase):
         self.assertEqual(c.latency_ms, 0)
         self.assertIsNone(c.prenatal_song)
         self.assertEqual(c.scroll_speed, 1.0)
+        self.assertTrue(c.ringing_hold)
 
     def test_roundtrip_creates_parent_dirs(self):
         c = Config(mode="ascii", timbre="bell", rhythm_keys=list("zxcvbn"),
-                   latency_ms=-42, prenatal_song="canon", scroll_speed=2.5)
+                   latency_ms=-42, prenatal_song="canon", scroll_speed=2.5,
+                   ringing_hold=False)
         c.save()
         self.assertTrue(os.path.isfile(self.path))
         self.assertEqual(Config.load(), c)
@@ -46,7 +48,8 @@ class ConfigFile(unittest.TestCase):
         with open(self.path, "r", encoding="utf-8") as f:
             data = json.load(f)
         self.assertEqual(set(data), {"mode", "timbre", "rhythm_keys", "latency_ms",
-                                     "prenatal_song", "scroll_speed", "sound"})
+                                     "prenatal_song", "scroll_speed", "sound",
+                                     "ringing_hold"})
 
     def test_missing_file_gives_defaults(self):
         self.assertEqual(Config.load(), Config())
@@ -89,6 +92,12 @@ class ConfigFile(unittest.TestCase):
         for mode in ("unicode", "ascii"):
             self.write({"mode": mode})
             self.assertEqual(Config.load().mode, mode)
+
+    def test_non_bool_ringing_hold_falls_back_to_on(self):
+        for bad in ("false", 0, 1, None, [], {}):
+            with self.subTest(ringing_hold=bad):
+                self.write({"ringing_hold": bad})
+                self.assertTrue(Config.load().ringing_hold)
 
     def test_sound_params_default_to_natural(self):
         c = Config()

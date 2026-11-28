@@ -59,7 +59,7 @@ class FreePlayScreen(Screen):
         self.key_down: Dict[str, bool] = {}
         self.last_event: Dict[str, float] = {}
         self.key_voice: Dict[str, int] = {}
-        self.focus = 0  # 0 = volume, 1 = note length (sound strip)
+        self.focus = 0  # 0 = volume, 1 = note length, 2 = ringing hold (strip)
         self._mouse_key: Optional[str] = None
         # Prenatal playback is paused until the song's pitches are rendered
         # (see _begin_playback); _wait_started bounds that wait.
@@ -127,7 +127,7 @@ class FreePlayScreen(Screen):
         elif k == "ctrl+a" and self.player is not None:
             self._pick_song()  # song picking only makes sense with prenatal on
         elif k in (UP, DOWN):
-            self.focus = 1 - self.focus  # toggle volume / length focus
+            self.focus = (self.focus + (1 if k == DOWN else -1)) % 3
         elif k in (LEFT, RIGHT):
             self._adjust(-1 if k == LEFT else 1)
         elif k in KEY_MIDI:
@@ -188,7 +188,13 @@ class FreePlayScreen(Screen):
                 self.audio.preload(tid, PRELOAD_MIDIS)
             return
         t = synth.get_timbre(tid)
-        if self.app.release_events() and (t.sustain or t.release_tau is not None):
+        # Sustained timbres always follow the key. Ringing ones only do while
+        # the strip's switch is on: with it off, harp/bell/chime fall back to
+        # the fixed-length one-shots they played before the hold work, so a
+        # tap rings out naturally instead of being cut on key-up.
+        hold = t.sustain or (self.config.ringing_hold
+                             and t.release_tau is not None)
+        if self.app.release_events() and hold:
             # Real key-up events: a sustained timbre holds until release; a
             # holdable ringing timbre decays at the selected rate while held
             # and speeds up to its release time constant on key-up.
@@ -254,6 +260,11 @@ class FreePlayScreen(Screen):
 
     def _adjust(self, sign: int) -> None:
         """Step the focused sound value of the current timbre."""
+        if self.focus == 2:
+            # The ringing-hold row is a switch, not a value: either arrow
+            # flips it.
+            self._toggle_hold()
+            return
         tid = self._active_timbre()
         vol, ln = self.config.sound_params(tid)
         if self.focus == 0:
@@ -264,6 +275,12 @@ class FreePlayScreen(Screen):
         self.config.save()
         if self.player is not None:  # keep the prenatal melody in sync
             self.player.vol, self.player.length = self.config.sound_params(tid)
+
+    def _toggle_hold(self) -> None:
+        """Flip the ringing-note key-hold feature and persist it."""
+        self.focus = 2
+        self.config.ringing_hold = not self.config.ringing_hold
+        self.config.save()
 
     def _toggle_prenatal(self) -> None:
         if self.player is None:
@@ -455,12 +472,17 @@ class FreePlayScreen(Screen):
                 break
             center_text(scr, y, text, fg, None, bold)
             y += 1
-        # The stacked sound strip takes two rows; prenatal progress one more.
-        reserve = 2 if (self.player is not None and ctrl_y - y >= 12) else 1
-        end = self._draw_keyboard(scr, y, ctrl_y - reserve - 1)
-        if self.player is not None and ctrl_y - 3 >= max(y, end):
-            self._draw_progress(scr, ctrl_y - 3)
-        self._draw_sound_strip(scr, ctrl_y - 2)
+        # The stacked sound strip takes three rows (volume, length, hold);
+        # prenatal progress needs one more above it, and only when the screen
+        # is tall enough to keep a usable keyboard next to it.
+        strip_top = ctrl_y - 3
+        progress_y = strip_top - 1
+        show_progress = self.player is not None and ctrl_y - y >= 12
+        end = self._draw_keyboard(scr, y, progress_y if show_progress
+                                 else strip_top)
+        if show_progress and progress_y >= max(y, end):
+            self._draw_progress(scr, progress_y)
+        self._draw_sound_strip(scr, strip_top)
         self._draw_controls(scr, ctrl_y, btn_h)
         center_text(scr, h - 2, th.t("freeplay.exit_hint"), C.dim)
 
@@ -575,7 +597,7 @@ class FreePlayScreen(Screen):
             x += bw + gap
 
     def _draw_sound_strip(self, scr: Buffer, y: int) -> None:
-        """Stacked per-timbre volume / length editors for the current timbre."""
+        """Stacked volume / length editors plus the ringing-hold switch."""
         th = self.theme
         w, h = scr.w, scr.h
         if not (0 <= y < h) or w < 30:
@@ -606,6 +628,16 @@ class FreePlayScreen(Screen):
             line = "%s %s %s" % (label, bar_text, val)
             scr.text(x, row, line, fg, None, sel)
             self.hits.add(x, row, seg_w, 1, (lambda idx=i: setattr(self, "focus", idx)))
+        # The ringing-hold switch sits under the two value rows: a click (or
+        # either arrow while focused) flips it; there is no bar to step.
+        row = y + len(segs)
+        if row >= h:
+            return
+        sel = self.focus == 2
+        state = th.t("common.on") if self.config.ringing_hold else th.t("common.off")
+        scr.text(x, row, th.t("freeplay.hold", state=state),
+                 C.cyan if sel else C.gray, None, sel)
+        self.hits.add(x, row, seg_w, 1, self._toggle_hold)
 
     def _draw_progress(self, scr: Buffer, y: int) -> None:
         p = self.player
