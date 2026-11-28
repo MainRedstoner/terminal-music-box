@@ -8,7 +8,7 @@ from tmb import songs
 from tmb.config import DEFAULT_KEYS
 from tmb.events import KeyEvent
 from tmb.screens.rhythm_game import (COUNTDOWN, GOOD_WIN, PERFECT_WIN,
-                                     REPEAT_TIMEOUT, RESULT_TAIL)
+                                     REPEAT_TIMEOUT, RESULT_TAIL, WAIT_TIMEOUT)
 
 try:
     from tests.helpers import HeadlessCase
@@ -117,6 +117,13 @@ class Setup(Game):
         self.start_play()
         self.advance(1.0)
         self.assertTrue(self.frame.strip())
+
+    def test_a_huge_scroll_speed_is_bounded_before_the_draw(self):
+        # A corrupt finite 1e308 used to turn `speed` into inf and crash the
+        # falling-note draw on an ordinary built-in chart.
+        self.restart(scroll_speed=1e308)
+        self.assertEqual(self.game.scroll_speed, 8.0)
+        self.assertEqual(self.game.state, "countdown")
 
 
 class Judgment(Game):
@@ -567,6 +574,50 @@ class LatencyOffset(Game):
         self.press(self.lane_key(n))
         self.assertEqual(self.game.perfect, 0)
         self.assertEqual(self.game.good, 1)
+
+
+class CountdownGate(HeadlessCase):
+    """Re-check the cache on entry and freeze the countdown while keys miss."""
+
+    def setUp(self):
+        super().setUp()
+        self.engine.realtime = True
+        self.engine.is_preloaded = mock.Mock(return_value=False)
+        self.engine.preload = mock.Mock()
+        self.app.navigate("rhythm_game", song=TEST_SONG)
+        self.game = self.app.current
+        self.step()
+
+    def test_the_countdown_waits_for_the_score_buffers(self):
+        self.assertTrue(self.game._waiting)
+        self.advance(1.0)
+        self.assertEqual(self.game.countdown, COUNTDOWN)
+        self.engine.is_preloaded.return_value = True
+        self.step()
+        self.assertFalse(self.game._waiting)
+        self.advance(0.5)
+        self.assertLess(self.game.countdown, COUNTDOWN)
+
+    def test_a_wedged_preload_does_not_block_the_song_forever(self):
+        self.advance(WAIT_TIMEOUT + 1.0)
+        self.assertFalse(self.game._waiting)
+        # The timeout must actually unfreeze the countdown, not merely clear
+        # the flag (enter() may never have set it in the first place).
+        self.assertLess(self.game.countdown, COUNTDOWN)
+
+    def test_the_wait_reissues_a_request_that_died(self):
+        self.engine.preload.reset_mock()
+        self.step()
+        self.assertEqual(self.app.current_name, "rhythm_game")
+        self.engine.preload.assert_called_once_with(self.game.timbre,
+                                                    self.game._score_midis)
+
+    def test_an_active_request_is_not_superseded(self):
+        self.engine.preload.reset_mock()
+        self.engine.preload_status = mock.Mock(return_value=(True, 3, 56))
+        self.step()
+        self.engine.preload.assert_not_called()
+        self.assertTrue(self.game._waiting)
 
 
 if __name__ == "__main__":

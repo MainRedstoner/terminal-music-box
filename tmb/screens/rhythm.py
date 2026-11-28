@@ -7,7 +7,18 @@ from ..ansi import Screen as Buffer, C, text_width
 from ..events import (KeyEvent, ENTER, SPACE, TAB, BACKSPACE, is_exit,
                       UP, DOWN, LEFT, RIGHT)
 from ..ui import (center_text, draw_box, draw_button, draw_menu_row,
-                  draw_search_field, draw_search_result_row, matches)
+                  draw_search_field, draw_search_result_row, matches,
+                  QUERY_MAX)
+
+# Auto-repeat debounce for the calibration screen on legacy terminals (no
+# key-up events: POSIX/macOS conventions; Windows and kitty report releases
+# and never reach this path). Below the 0.6 s beat period, so genuine taps
+# are never swallowed, but not above the OS repeat delay (0.5-0.66 s) —
+# raising it that far would eat real taps instead. A physical hold can
+# therefore still land ONE phantom sample (the first repeat, +0.5 s or so);
+# the median over 12 samples tolerates a single outlier, and the pre-debounce
+# behaviour was a dozen garbage samples.
+REPEAT_TIMEOUT = 0.3
 from .base import Screen
 from .. import songs
 
@@ -30,6 +41,7 @@ class RhythmMenuScreen(Screen):
         self._pending_song = None
         self._pending_pack = None
         self.notice = ""
+        self.notice_fg = C.red
         self.searching = False
         self.query = ""
         self.app.external.refresh()
@@ -100,15 +112,23 @@ class RhythmMenuScreen(Screen):
         if pack is None:
             if self._song_ready(sid):
                 self._pending_song = None
+                self._pending_pack = None
                 self.app.navigate("rhythm_game", song=sid)
                 return
+            # A pack left pending from an earlier Enter must not win once the
+            # user has picked a built-in song: update() branches on
+            # _pending_pack first and would start that pack when it decoded.
             self._pending_song = sid
+            self._pending_pack = None
+            # A queued notice belonged to a pack; this choice replaces it.
+            self.notice = ""
             timbre, midis = self._song_audio(sid)
             self.audio.preload(timbre, midis)
             return
         ext = self.app.external
         if not ext.can_decode(pack):
             self.notice = self.theme.t("rhythm.need_ffmpeg")
+            self.notice_fg = C.red
             return
         self.notice = ""
         if ext.is_ready(pack.id):
@@ -118,7 +138,13 @@ class RhythmMenuScreen(Screen):
             return
         self._pending_song = pack.id
         self._pending_pack = pack
-        ext.start_decode(pack.id)
+        if not ext.start_decode(pack.id):
+            # Another pack's decode holds the single slot; ours starts when
+            # it finishes (update's healing path fires it). Say so, or the
+            # silent wait is indistinguishable from a hang — and the loading
+            # overlay shows the OTHER pack's progress meanwhile.
+            self.notice = self.theme.t("rhythm.decode_queued")
+            self.notice_fg = C.cyan
 
     def _song_audio(self, sid: str):
         song = songs.SONGS[sid]
@@ -162,11 +188,12 @@ class RhythmMenuScreen(Screen):
             self._pending_song = None
             self._pending_pack = None
             self.notice = self.theme.t("rhythm.external_error", msg=err)
+            self.notice_fg = C.red
             return
         # Healing: a decode request that neither finished nor errored is dead.
         active, _done, _total = ext.status()
-        if not active:
-            ext.start_decode(pack.id)
+        if not active and ext.start_decode(pack.id):
+            self.notice = ""  # the queued decode is finally running
 
     def exit(self) -> None:
         self._pending_song = None
@@ -202,11 +229,11 @@ class RhythmMenuScreen(Screen):
                 self._apply_query()
                 return
             if k == SPACE:
-                self.query += " "
+                self.query = (self.query + " ")[-QUERY_MAX:]
                 self._apply_query()
                 return
             if len(k) == 1:
-                self.query += k
+                self.query = (self.query + k)[-QUERY_MAX:]
                 self._apply_query()
                 return
             if k == UP:
@@ -327,7 +354,7 @@ class RhythmMenuScreen(Screen):
             )
 
         if self.notice:
-            center_text(scr, h - 2, self.notice, C.red)
+            center_text(scr, h - 2, self.notice, self.notice_fg)
         else:
             center_text(scr, h - 2, th.t("rhythm.menu_hint"), C.dim)
 
@@ -345,6 +372,8 @@ class RhythmCalibScreen(Screen):
         self.done = False
         self.status = ""
         self.status_fg = C.green
+        self._held: set = set()
+        self._last_tap: dict = {}
 
     def exit(self) -> None:
         self.audio.stop_all()
@@ -360,6 +389,7 @@ class RhythmCalibScreen(Screen):
 
     def handle_key(self, ev: KeyEvent) -> None:
         if not ev.pressed:
+            self._held.discard(ev.key)
             return
         k = ev.key
         if is_exit(k):
@@ -367,6 +397,20 @@ class RhythmCalibScreen(Screen):
         elif k == "r":
             self._reset()
         elif not self.done:
+            if ev.repeat:
+                return
+            if self.app.release_events():
+                if k in self._held:
+                    return  # still held: auto-repeat without a repeat flag
+                self._held.add(k)
+            else:
+                # No key-up events: a hold is only visible as the burst of
+                # repeats it produces, so time-debounce each key like the
+                # game screen does. One physical hold must not fill the
+                # whole sample set with garbage offsets.
+                if self.clock - self._last_tap.get(k, -1e9) < REPEAT_TIMEOUT:
+                    return
+            self._last_tap[k] = self.clock
             self._tap()
 
     def _tap(self) -> None:
@@ -390,6 +434,8 @@ class RhythmCalibScreen(Screen):
         self.done = False
         self.clock = 0.0
         self._beat = 0
+        self._held = set()
+        self._last_tap = {}
         self.status = self.theme.t("rhythm.calib_reset")
         self.status_fg = C.yellow
 

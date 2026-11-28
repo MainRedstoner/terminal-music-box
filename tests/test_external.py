@@ -8,7 +8,9 @@ import math
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
+import threading
 import time
 import unittest
 import wave
@@ -144,6 +146,33 @@ class PackParsing(unittest.TestCase):
         path = build_pack(self.tmp.name, manifest={"format": 99})
         with self.assertRaises(external.PackError):
             external.read_pack(path)
+
+    def test_non_finite_manifest_numbers_fall_back(self):
+        path = build_pack(self.tmp.name, sid="nonfinite",
+                          manifest={"duration": float("inf"),
+                                    "offset": float("-inf")})
+        pack = external.read_pack(path)
+        self.assertEqual(pack.duration, 0.0)
+        self.assertEqual(pack.offset, 0.0)
+
+    def test_huge_manifest_numbers_are_bounded(self):
+        # isfinite was not enough: int(1e308 * 44100) overflows to inf and
+        # took the whole app down when the pack was selected.
+        path = build_pack(self.tmp.name, sid="huge",
+                          manifest={"duration": 1e308, "offset": 1e308})
+        pack = external.read_pack(path)
+        self.assertEqual(pack.duration, external.MAX_SECONDS)
+        self.assertEqual(pack.offset, external.MAX_SECONDS)
+
+    def test_non_finite_and_absurd_chart_times_are_rejected(self):
+        # inf/nan collapse to the -1 default here; the finite 1e308 used to
+        # slip through and overflow the falling-note draw instead.
+        for chart in ([[float("inf"), 0]], [[float("nan"), 0]],
+                      [[1e308, 0]]):
+            with self.subTest(chart=chart):
+                path = build_pack(self.tmp.name, sid="badtime", chart=chart)
+                with self.assertRaises(external.PackError):
+                    external.read_pack(path)
 
     def test_rejects_a_corrupt_zip(self):
         path = os.path.join(self.tmp.name, "bad.tmbp")
@@ -297,6 +326,14 @@ class PackPlayerLogic(unittest.TestCase):
         p = external.PackPlayer(eng, array.array("h", range(10)), volume=0.5)
         p.sync(0.0, lead_in=0.0)
         self.assertEqual(eng.voices[1]["gain"], 0.5)
+
+    def test_a_huge_offset_is_bounded_before_the_frame_math(self):
+        p = external.PackPlayer(FakeEngine(sr=100),
+                                array.array("h", range(100)),
+                                offset=1e308)
+        self.assertEqual(p.offset, external.MAX_SECONDS)
+        p.sync(1.0, lead_in=0.0)   # int(inf) used to raise right here
+        self.assertTrue(p.finished)  # the offset is past the audio
 
 
 class PackPlayerEngine(unittest.TestCase):
@@ -536,6 +573,330 @@ class LibraryBehaviour(unittest.TestCase):
         self._wait_ready("a")
         self.lib.release_all()
         self.assertIsNone(self.lib.get_pcm("a"))
+
+    def test_an_absurd_chart_time_is_a_warning_not_a_crash(self):
+        build_pack(self.tmp.name, sid="badtime", chart=[[1e308, 0]])
+        self.lib.refresh()          # must not raise
+        self.assertEqual(self.lib.packs, [])
+        self.assertTrue(self.lib.warnings)
+
+
+class CorruptMembers(unittest.TestCase):
+    """X1: member-level corruption surfaces as PackError, never as a raw
+    BadZipFile/RuntimeError that crashes the app from the rhythm menu."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    @staticmethod
+    def _flip_data_byte(path, member):
+        with open(path, "rb") as f:
+            raw = bytearray(f.read())
+        with zipfile.ZipFile(path) as zf:
+            info = zf.getinfo(member)
+        h = info.header_offset
+        extra = raw[h + 28] | (raw[h + 29] << 8)  # local header's extra len
+        data = h + 30 + len(info.filename.encode("utf-8")) + extra
+        raw[data + 1] ^= 0xFF
+        with open(path, "wb") as f:
+            f.write(raw)
+
+    def test_a_corrupt_manifest_member_raises_packerror(self):
+        path = build_pack(self.tmp.name, name="a.tmbp", sid="a")
+        self._flip_data_byte(path, "manifest.json")
+        with self.assertRaises(external.PackError):
+            external.read_pack(path)
+
+    def test_a_corrupt_chart_member_raises_packerror(self):
+        path = build_pack(self.tmp.name, name="b.tmbp", sid="b")
+        self._flip_data_byte(path, "chart.json")
+        with self.assertRaises(external.PackError):
+            external.read_pack(path)
+
+    def test_an_encrypted_member_raises_packerror(self):
+        # The "encrypted" general-purpose bit lives in the central directory
+        # entry (flag_bits); the flag alone is enough for zipfile to refuse
+        # the member with RuntimeError. Central entries are found by their
+        # signature + a sane filename (the signature can occur by chance
+        # inside stored member data).
+        path = os.path.join(self.tmp.name, "c.tmbp")
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("manifest.json", json.dumps(
+                {"format": 1, "id": "c", "audio": "audio.wav"}))
+            zf.writestr("chart.json", json.dumps({"notes": NOTES}))
+            zf.writestr("audio.wav", wav_bytes(0.5))
+        with open(path, "rb") as f:
+            raw = bytearray(f.read())
+        idx = raw.find(b"PK\x01\x02")
+        while idx != -1:
+            nlen = raw[idx + 28] | (raw[idx + 29] << 8)
+            elen = raw[idx + 30] | (raw[idx + 31] << 8)
+            clen = raw[idx + 32] | (raw[idx + 33] << 8)
+            if (nlen <= 256 and elen <= 128 and clen <= 1 << 20
+                    and bytes(raw[idx + 46:idx + 46 + nlen]) == b"chart.json"):
+                raw[idx + 8] |= 0x01
+                with open(path, "wb") as f:
+                    f.write(raw)
+                break
+            idx = raw.find(b"PK\x01\x02", idx + 4)
+        with self.assertRaises(external.PackError):
+            external.read_pack(path)
+
+    def test_library_reports_a_corrupt_pack_as_a_warning(self):
+        path = build_pack(self.tmp.name, name="bad.tmbp", sid="bad")
+        self._flip_data_byte(path, "manifest.json")
+        lib = external.Library(engine_sr=44100, directory=self.tmp.name)
+        lib.refresh()  # must not raise
+        self.assertEqual(lib.packs, [])
+        self.assertTrue(lib.warnings)
+
+
+class TitleSanitize(unittest.TestCase):
+    """U2: pack-provided titles cannot inject control bytes into the grid."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_titles_are_stripped_of_control_characters(self):
+        path = build_pack(self.tmp.name, sid="evil",
+                          manifest={"title_zh": "X" + chr(27) + "[2JY", "title_en": "A" + chr(10) + "B",
+                                    "difficulty": "Nor" + chr(7) + "mal"})
+        pack = external.read_pack(path)
+        self.assertEqual(pack.title_zh, "X[2JY")
+        self.assertEqual(pack.title_en, "AB")
+        self.assertEqual(pack.difficulty, "Normal")
+
+    def test_a_title_that_sanitizes_to_empty_falls_back(self):
+        path = build_pack(self.tmp.name, sid="fallback",
+                          manifest={"title_zh": chr(27)})
+        self.assertEqual(external.read_pack(path).title_zh, "fallback")
+
+
+class RefreshCache(unittest.TestCase):
+    """X3/U4: refresh() reuses parsed packs while files are unchanged and
+    drops cached PCM whose pack file was replaced or deleted; X4: a failed
+    decode keeps the previous pack playable; X6: one decode at a time;
+    X7: an empty error message still reports the failure."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.lib = external.Library(engine_sr=44100, directory=self.tmp.name)
+
+    def _wait_ready(self, sid):
+        self.lib.start_decode(sid)
+        for _ in range(2000):
+            if self.lib.is_ready(sid):
+                return
+            time.sleep(0.005)
+        self.fail("decode never finished: %s" % self.lib.error(sid))
+
+    def _wait_idle(self):
+        for _ in range(2000):
+            if not self.lib.status()[0]:
+                return
+            time.sleep(0.005)
+        self.fail("decode never finished")
+
+    def test_refresh_reuses_parsed_packs_until_the_file_changes(self):
+        build_pack(self.tmp.name, sid="a")
+        self.lib.refresh()
+        first = self.lib.get("a")
+        with mock.patch.object(external, "read_pack",
+                               wraps=external.read_pack) as spy:
+            self.lib.refresh()
+            self.assertEqual(spy.call_count, 0)
+            self.assertIs(self.lib.get("a"), first)
+        build_pack(self.tmp.name, sid="a", duration=5.0)
+        self.lib.refresh()
+        self.assertIsNot(self.lib.get("a"), first)
+        self.assertEqual(self.lib.get("a").duration, 5.0)
+
+    def test_a_replaced_pack_invalidates_its_cached_pcm(self):
+        build_pack(self.tmp.name, sid="a", duration=1.0)
+        self.lib.refresh()
+        self._wait_ready("a")
+        self.assertEqual(len(self.lib.get_pcm("a")), 44100)
+        build_pack(self.tmp.name, sid="a", duration=2.0)
+        self.lib.refresh()
+        self.assertFalse(self.lib.is_ready("a"))
+        self.assertIsNone(self.lib.get_pcm("a"))
+        self._wait_ready("a")
+        self.assertEqual(len(self.lib.get_pcm("a")), 88200)
+
+    def test_a_deleted_pack_invalidates_its_cached_pcm(self):
+        path = build_pack(self.tmp.name, sid="a", duration=1.0)
+        self.lib.refresh()
+        self._wait_ready("a")
+        os.remove(path)
+        self.lib.refresh()
+        self.assertEqual(self.lib.packs, [])
+        self.assertFalse(self.lib.is_ready("a"))
+
+    def test_a_failed_decode_keeps_the_previous_pack_playable(self):
+        build_pack(self.tmp.name, name="a.tmbp", sid="a")
+        build_pack(self.tmp.name, name="b.tmbp", sid="b",
+                   audio="audio.opus", data=bytes(64))
+        self.lib.refresh()
+        self._wait_ready("a")
+        self.lib.start_decode("b")
+        for _ in range(2000):
+            if self.lib.error("b"):
+                break
+            time.sleep(0.005)
+        self.assertTrue(self.lib.error("b"))
+        self.assertIsNotNone(self.lib.get_pcm("a"))
+
+    def test_a_decode_finishing_after_a_replacement_stays_stale(self):
+        # refresh() recorded the replacement's signature while the old decode
+        # was still running: storing the old PCM back would poison the cache
+        # (the menu would see "ready" and play old audio on the new chart).
+        build_pack(self.tmp.name, sid="a", duration=1.0)
+        self.lib.refresh()
+        started = threading.Event()
+        release = threading.Event()
+
+        def fake_wav(src, sr):
+            started.set()
+            release.wait(5)
+            return array.array("h", [111, 222, 333])
+
+        with mock.patch.object(external, "_decode_wav", fake_wav):
+            self.lib.start_decode("a")
+            self.assertTrue(started.wait(5))
+            build_pack(self.tmp.name, sid="a", duration=2.0)
+            self.lib.refresh()
+            release.set()
+            self._wait_idle()
+        self.assertFalse(self.lib.is_ready("a"))
+        self.assertIsNone(self.lib.get_pcm("a"))
+
+    def test_start_decode_refuses_while_another_decode_is_running(self):
+        build_pack(self.tmp.name, name="a.tmbp", sid="a")
+        build_pack(self.tmp.name, name="b.tmbp", sid="b")
+        self.lib.refresh()
+        started = threading.Event()
+        release = threading.Event()
+
+        def fake_wav(src, sr):
+            started.set()
+            release.wait(5)
+            return array.array("h", [0, 0])
+
+        with mock.patch.object(external, "_decode_wav", fake_wav):
+            self.assertTrue(self.lib.start_decode("a"))
+            self.assertTrue(started.wait(5))
+            # A second request must not stack a second decode thread on top.
+            self.assertFalse(self.lib.start_decode("b"))
+            release.set()
+            self._wait_idle()
+            self.assertTrue(self.lib.start_decode("b"))
+
+    def test_an_empty_error_message_still_reports_the_failure(self):
+        build_pack(self.tmp.name, sid="a")
+        self.lib.refresh()
+        with mock.patch.object(external, "_decode_wav",
+                               side_effect=MemoryError()):
+            self.lib.start_decode("a")
+            self._wait_idle()
+        self.assertEqual(self.lib.error("a"), "MemoryError")
+
+
+@unittest.skipUnless(HAS_FFMPEG, "ffmpeg required")
+class DecodeProgress(unittest.TestCase):
+    """The decode total grows with the frames actually produced: a manifest
+    duration shorter than the audio used to report done > total (the loading
+    popup then drew 600% over its box)."""
+
+    def test_the_total_grows_with_the_frames(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        build_pack(tmp.name, sid="short", audio="audio.opus",
+                   data=b"\x00" * 8, manifest={"duration": 0.5})
+        lib = external.Library(engine_sr=44100, directory=tmp.name)
+        lib.refresh()
+        seen = []
+
+        def fake_ffmpeg(path, sr, progress=None):
+            progress(50000)                 # far past the 0.5 s claim
+            seen.append(lib.status())
+            return array.array("h", [0] * 16)
+
+        with mock.patch.object(external, "_decode_ffmpeg_file", fake_ffmpeg):
+            self.assertTrue(lib.start_decode("short"))
+            for _ in range(2000):
+                if not lib.status()[0]:
+                    break
+                time.sleep(0.005)
+        self.assertTrue(seen)
+        active, done, total = seen[0]
+        self.assertTrue(active)
+        self.assertEqual((done, total), (50000, 50000))
+
+
+class Watchdog(unittest.TestCase):
+    """_reap_later: a decode must not hold the single slot on a stalled
+    ffmpeg - the watchdog kills the child at the deadline."""
+
+    def test_reap_later_kills_a_stuck_process(self):
+        proc = subprocess.Popen([sys.executable, "-c",
+                                 "import time; time.sleep(60)"])
+        self.addCleanup(proc.wait)
+        external._reap_later(proc, 0.5)
+        # poll() does not reflect the kill until the child is reaped.
+        rc = proc.wait(timeout=10)
+        self.assertIsNotNone(rc)
+        self.assertNotEqual(rc, 0)
+
+
+@unittest.skipUnless(HAS_FFMPEG, "ffmpeg required")
+class StderrDrain(unittest.TestCase):
+    """X2 regression: stderr is drained while stdout is read, so a chatty
+    ffmpeg (corrupt input prints one error per frame, megabytes of it) can
+    never fill the pipe and deadlock the decode thread."""
+
+    def test_a_chatty_corrupt_input_does_not_hang_the_decode(self):
+        # MPEG frame header + megabytes of garbage: well past the pipe
+        # buffer's capacity. Old code hung forever here; drained, it fails
+        # loudly in well under a second.
+        import random
+        # A seeded noise payload: an all-zero body would decode as "valid"
+        # silent MPEG frames, so real garbage is what floods stderr.
+        data = bytes([0xff, 0xfb, 0x90, 0x64]) + random.Random(0).randbytes(8 << 20)
+        result = {}
+
+        def run():
+            try:
+                pcm = external.decode_audio(data, 44100, "audio.mp3")
+                result["frames"] = len(pcm)
+            except external.PackError as e:
+                result["err"] = str(e)
+            except Exception as e:  # noqa: BLE001 - reported below
+                result["unexpected"] = repr(e)
+
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+        t.join(timeout=60)
+        self.assertFalse(t.is_alive(), "decode_audio hung on chatty stderr")
+        # It must end loudly or with nothing decoded - never "successfully"
+        # pretending garbage was music.
+        self.assertTrue("err" in result or result.get("frames") == 0,
+                        result)
+
+
+@unittest.skipUnless(HAS_FFMPEG, "ffmpeg required")
+class StreamRewind(unittest.TestCase):
+    """decode_audio(fileobj): a failed WAV fast path must rewind the stream
+    before handing it to ffmpeg, not feed it a headless copy."""
+
+    def test_rate_mismatch_stream_still_decodes_whole(self):
+        bio = io.BytesIO(wav_bytes(0.5, sr=22050))
+        pcm = external.decode_audio(bio, 44100, "audio.wav")
+        # 0.5 s resampled to 44100 Hz: without the rewind the copy started
+        # after the data-chunk header and ffmpeg decoded garbage.
+        self.assertAlmostEqual(len(pcm), 22050, delta=4410)
 
 
 if __name__ == "__main__":

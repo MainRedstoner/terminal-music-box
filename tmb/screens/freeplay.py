@@ -23,7 +23,8 @@ NOTE_NAMES = {0: "C", 2: "D", 4: "E", 5: "F", 7: "G", 9: "A", 11: "B"}
 # first press. Prenatal mode is a different animal: it auto-plays a song's
 # complete score, which reaches outside C3-B5 (Canon's bass line bottoms out at
 # C2, Für Elise climbs to E7), so it preloads the selected song's own pitches
-# and waits for them before playback starts — see _ensure_buffers.
+# with the keyboard keys after them, and waits for that whole set before
+# playback starts — see _prenatal_keys.
 PRELOAD_MIDIS = sorted(set(KEY_MIDI.values()))
 
 REPEAT_TIMEOUT = 0.2   # auto-repeat debounce: legacy terminals have no key-up
@@ -76,6 +77,9 @@ class FreePlayScreen(Screen):
             self.last_activity = self.clock
             return
         self._reset()
+        # Another screen's preloads (or a rhythm score) may have evicted these
+        # 21 keys since startup; re-arm them so a press never renders inline.
+        self.audio.preload(self.config.timbre, PRELOAD_MIDIS)
 
     def exit(self) -> None:
         picking = self._picking
@@ -83,6 +87,13 @@ class FreePlayScreen(Screen):
         self._clear_keys()
         if picking:
             self._resuming = True
+            if self.player is not None:
+                # Freeze the melody while the picker is up. The player follows
+                # the audio clock even offscreen (update() is not called, so
+                # nothing schedules the notes it crosses — silence with the
+                # clock still running), and returning used to fire every note
+                # it had crossed in one zero-delay burst.
+                self.player.pause()
             return
         self._resuming = False
         if self.player is not None:
@@ -151,6 +162,18 @@ class FreePlayScreen(Screen):
         midi = KEY_MIDI[key]
         tid = self.config.timbre
         vol, length = self.config.sound_params(tid)
+        if self.audio.realtime and not self.audio.is_preloaded(tid, (midi,)):
+            # A cold note would render inline in this (UI) thread: hundreds of
+            # ms of frozen frame and a late note. Render it in the background
+            # and drop this press; the loading popup shows the work. Ask for
+            # the whole keyboard, not just this key: a single-key request
+            # supersedes enter()'s 21-key batch, and nothing would queue the
+            # other keys again (their first press would be dropped for good).
+            # While a request is already running, drop the press without a
+            # new one — it would cancel and restart the same renders.
+            if not self.audio.preload_status()[0]:
+                self.audio.preload(tid, PRELOAD_MIDIS)
+            return
         t = synth.get_timbre(tid)
         if self.app.release_events() and (t.sustain or t.release_tau is not None):
             # Real key-up events: a sustained timbre holds until release; a
@@ -185,7 +208,7 @@ class FreePlayScreen(Screen):
     def _open_timbre(self) -> None:
         self._picking = True
         self.app.navigate("timbre_select", on_select=self._apply_timbre,
-                          back="freeplay", selected=self.config.timbre)
+                          back="freeplay", selected=self._active_timbre())
 
     def _apply_timbre(self, tid: str) -> None:
         self.config.timbre = tid
@@ -294,10 +317,25 @@ class FreePlayScreen(Screen):
         self._wait_started = self.clock
         p.pause()
 
-    def _ensure_buffers(self, force: bool = False) -> bool:
-        """True when every pitch of the song is cached for the player's timbre.
+    def _prenatal_keys(self) -> List[int]:
+        """Pitches the prenatal session needs: the song first, keyboard after.
 
-        Missing pitches are requested in the background. `force` (a fresh
+        The gate and the request must agree: waiting only for the song's own
+        pitches started playback while the tail of the same request (the
+        missing keyboard keys) was still rendering, competing with the mixer
+        on a single-core Pi.
+        """
+        p = self.player
+        if p is None:
+            return []
+        keys = list(p.song.pitches)
+        have = set(keys)
+        return keys + [m for m in PRELOAD_MIDIS if m not in have]
+
+    def _ensure_buffers(self, force: bool = False) -> bool:
+        """True when every key of the prenatal request is cached for its timbre.
+
+        Missing keys are requested in the background. `force` (a fresh
         start) always asks, so a request superseded by another screen or by a
         newer timbre cannot leave the gate shut for good; otherwise it only
         re-asks when nothing is in flight, which rescues a request that ended
@@ -308,7 +346,7 @@ class FreePlayScreen(Screen):
             return True
         if not self.audio.realtime:
             return True  # offline/headless runs have no playback thread to stall
-        midis = p.song.pitches
+        midis = self._prenatal_keys()
         if self.audio.is_preloaded(p.timbre, midis):
             return True
         if force or not self.audio.preload_status()[0]:
@@ -320,10 +358,7 @@ class FreePlayScreen(Screen):
         p = self.player
         if p is None:
             return
-        keys = p.song.pitches
-        have = set(keys)
-        self.audio.preload(p.timbre,
-                           keys + [m for m in PRELOAD_MIDIS if m not in have])
+        self.audio.preload(p.timbre, self._prenatal_keys())
 
     # Simulation --------------------------------------------------------------
 
@@ -344,6 +379,10 @@ class FreePlayScreen(Screen):
             if self._waiting:
                 if self._ensure_buffers():
                     self._waiting = False
+                    # The gate's wait ate into the activity window: opening
+                    # it must not instantly trip the idle pause below — once
+                    # paused, nothing re-arms the melody on its own.
+                    self.last_activity = self.clock
                 elif self.clock - self._wait_started > WAIT_TIMEOUT:
                     # A wedged render must not wedge the screen for good:
                     # stop waiting and take the stalls as they come. Playback

@@ -13,6 +13,11 @@ from .theme import Theme
 
 Region = Tuple[int, int, int, int, Any]
 
+# A search query longer than this is useless and dangerous: a pasted blob
+# used to make every keystroke O(len) over the whole query (matches(),
+# casefold, the draw pass) - quadratic across a paste burst.
+QUERY_MAX = 256
+
 
 class HitMap:
     def __init__(self):
@@ -62,6 +67,7 @@ def draw_button(screen: Screen, x: int, y: int, w: int, h: int, label: str,
     draw_box(screen, x, y, w, h, theme, fg=C.cyan if selected else fg, bg=bg)
     # fill interior
     screen.fill(x + 1, y + 1, w - 2, h - 2, " ", fg, bg)
+    label = fit_text(label, max(1, w - 2))
     tw = text_width(label)
     tx = x + max(1, (w - tw) // 2)
     ty = y + h // 2
@@ -73,11 +79,16 @@ def draw_button(screen: Screen, x: int, y: int, w: int, h: int, label: str,
 def draw_menu_row(screen: Screen, x: int, y: int, w: int, label: str, selected: bool,
                   theme: Theme, fg=None, hits: Optional[HitMap] = None, action: Any = None,
                   marker="> ") -> None:
+    # fit_text keeps a long label (an external pack's unbounded title, a
+    # narrow terminal's fixed labels) from overwriting the row's border and
+    # the neighbouring pane; draw_search_result_row already did this.
     if selected:
         screen.fill(x, y, w, 1, " ", C.black, C.cyan)
+        label = fit_text(label, max(1, w - 1 - text_width(marker)))
         screen.text(x + 1, y, marker + label, C.black, C.cyan, True)
     else:
         screen.fill(x, y, w, 1, " ", fg, None)
+        label = fit_text(label, max(1, w - 3))
         screen.text(x + 1, y, "  " + label, fg if fg is not None else C.white, None)
     if hits is not None and action is not None:
         hits.add(x, y, w, 1, action)
@@ -97,13 +108,24 @@ def draw_search_field(screen: Screen, x: int, y: int, w: int, query: str,
                       theme: Theme) -> int:
     """The '/query▌' input line of a searchable list; returns its width.
 
-    Overlong queries drop characters from the left so the caret stays visible.
+    Overlong queries drop characters from the left so the caret stays
+    visible. The kept suffix is found in one right-to-left pass: the old loop
+    re-measured the whole remaining string per dropped character, which made
+    a pasted query an O(n²) frame (seconds of freeze at 8k characters).
     """
     cursor = "▌" if theme.is_unicode else "_"
+    limit = max(1, w) - text_width(cursor) - 1
+    used = 0
+    start = len(query)
+    while start > 0 and used + char_width(query[start - 1]) <= limit:
+        used += char_width(query[start - 1])
+        start -= 1
+    if start == len(query) and query:
+        # Even one character overflows: show the last one (the old loop also
+        # never dropped the final character).
+        start = len(query) - 1
+    query = query[start:]
     line = "/" + query + cursor
-    while text_width(line) > max(1, w) and len(query) > 1:
-        query = query[1:]
-        line = "/" + query + cursor
     screen.text(x, y, line, C.white, None, True)
     return text_width(line)
 
@@ -211,10 +233,10 @@ def draw_loading_overlay(screen: Screen, theme: Theme, done: int,
     y = (h - bh) // 2
     draw_box(screen, x, y, bw, bh, theme, fg=C.cyan,
              title=theme.t("loading.title"), title_fg=C.yellow)
-    ratio = done / total if total else 1.0
+    ratio = min(1.0, done / total) if total else 1.0
     center_text(screen, y + 1, "%d%%" % round(ratio * 100), C.white, None, True)
     barw = max(4, bw - 6)
-    nfill = int(barw * ratio)
+    nfill = min(barw, int(barw * ratio))
     fill, empty = ("█", "░") if theme.is_unicode else ("#", "-")
     bx = x + (bw - barw) // 2
     screen.text(bx, y + 3, fill * nfill, C.cyan)

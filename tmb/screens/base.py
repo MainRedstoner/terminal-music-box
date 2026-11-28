@@ -7,7 +7,8 @@ from ..ansi import Screen as Buffer, C
 from ..events import (KeyEvent, MouseEvent, is_exit, UP, DOWN, ENTER, SPACE,
                       BACKSPACE, HOME, END, PGUP, PGDN)
 from ..ui import (HitMap, draw_box, draw_menu_row, center_text,
-                  draw_search_field, draw_search_result_row, matches)
+                  draw_search_field, draw_search_result_row, matches,
+                  QUERY_MAX)
 
 NAV_KEYS = (UP, DOWN, HOME, END, PGUP, PGDN, ENTER)
 
@@ -125,12 +126,12 @@ class ListScreen(Screen):
                 self.refresh()
                 return
             if k == SPACE:
-                self.query += " "  # typing, not activating
+                self.query = (self.query + " ")[-QUERY_MAX:]  # typing, not activating
                 self.refresh()
                 self.index = 0
                 return
             elif len(k) == 1:
-                self.query += k
+                self.query = (self.query + k)[-QUERY_MAX:]
                 self.refresh()
                 self.index = 0  # each typed char restarts at the first match
                 return

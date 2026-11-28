@@ -515,6 +515,22 @@ class PrenatalPreload(HeadlessCase):
                 # ...and the keyboard stays warm from the same request.
                 self.assertLessEqual(set(PRELOAD_MIDIS), set(midis))
 
+    def test_the_gate_covers_the_whole_request_not_just_the_song(self):
+        self.cfg.prenatal_song = "canon"
+        self.press("ctrl+t")
+        tid, midis = self.requested()
+        # Prenatal locks the song's timbre, like the rhythm game does.
+        self.assertEqual(tid, songs.SONGS["canon"].timbre or self.cfg.timbre)
+        # The request holds the whole score and the keyboard keys after it.
+        self.assertLessEqual(set(songs.SONGS["canon"].pitches), set(midis))
+        self.assertLessEqual(set(PRELOAD_MIDIS), set(midis))
+        # ...and the gate inspects that same set, not only the song's pitches
+        # (Canon never plays D3 or E3, so it cannot warm those keys itself).
+        checked = set()
+        for call in self.engine.is_preloaded.call_args_list:
+            checked.update(call[0][1])
+        self.assertLessEqual(set(PRELOAD_MIDIS), checked)
+
     def test_a_stale_selection_preloads_the_fallback_song(self):
         self.cfg.prenatal_song = "twinkle"  # a retired id still in old configs
         self.press("ctrl+t")
@@ -540,11 +556,14 @@ class PrenatalPreload(HeadlessCase):
         self.engine.preload_status.return_value = (True, 0, 8)
         cycle_timbre(self)
         self.assertEqual(p.timbre, self.cfg.timbre)
-        self.assertEqual(p.timbre, "bit")
+        # ^X highlights the timbre that actually sounds (the song's locked
+        # one), so cycling applies its neighbour in synth.ORDER - whatever
+        # entry that is, it is no longer the locked timbre itself.
+        self.assertNotEqual(p.timbre, songs.SONGS["canon"].timbre)
         self.assertTrue(self.screen._waiting)
         self.assertFalse(p.playing)
         self.assertGreaterEqual(p.pos, pos)  # parked mid-phrase, not rewound
-        self.assertEqual(self.engine.preload.call_args[0][0], "bit")
+        self.assertEqual(self.engine.preload.call_args[0][0], p.timbre)
         self.engine.is_preloaded.return_value = True
         self.step()
         self.assertTrue(p.playing)
@@ -765,6 +784,127 @@ class FreePlayAscii(HeadlessCase):
         self.press("enter")
         self.assertEqual(self.cfg.timbre, "bit")
         self.assertIn("Bit", self.frame)
+
+
+class FreePlayColdKey(HeadlessCase):
+    """A cold key must not render inline in the UI thread."""
+
+    start_screen = "freeplay"
+
+    def setUp(self):
+        super().setUp()
+        self.engine.realtime = True
+        self.engine.is_preloaded = mock.Mock(return_value=False)
+        self.engine.preload = mock.Mock()
+        self.engine.preload_status = mock.Mock(return_value=(False, 0, 0))
+        self.engine.play_note = mock.Mock()
+        self.engine.note_on = mock.Mock()
+
+    def voiced(self) -> int:
+        return self.engine.play_note.call_count + self.engine.note_on.call_count
+
+    def test_a_cold_key_requests_its_buffer_and_skips_the_note(self):
+        self.press("q")
+        self.assertEqual(self.voiced(), 0)
+        tid, midis = self.engine.preload.call_args[0]
+        self.assertEqual(tid, self.cfg.timbre)
+        self.assertIn(KEY_MIDI["q"], list(midis))
+
+    def test_a_cold_key_rearms_the_whole_keyboard(self):
+        # A single-key request would supersede enter()'s 21-key batch and the
+        # other keys would stay cold for the rest of the session.
+        self.press("q")
+        self.assertEqual(self.voiced(), 0)
+        self.engine.preload.assert_called_once_with(self.cfg.timbre,
+                                                    PRELOAD_MIDIS)
+
+    def test_a_cold_key_does_not_supersede_a_running_request(self):
+        self.engine.preload_status.return_value = (True, 0, 21)
+        self.press("q")
+        self.engine.preload.assert_not_called()
+        self.assertEqual(self.voiced(), 0)
+
+    def test_a_warm_key_plays(self):
+        self.engine.is_preloaded.return_value = True
+        self.press("q")
+        # Harp is a holdable ringing timbre, so a warm press starts a voice
+        # through note_on; play_note is the fixed-length path. Either is fine,
+        # exactly one must fire (the point is that the press is not dropped).
+        self.assertEqual(self.voiced(), 1)
+
+    def test_entering_freeplay_rearms_the_keyboard_preload(self):
+        self.engine.preload.reset_mock()
+        self.app.navigate("freeplay")
+        self.engine.preload.assert_called_once_with(self.cfg.timbre, PRELOAD_MIDIS)
+
+
+
+
+class OffscreenFreeze(HeadlessCase):
+    """P1/P2/P3: leaving to a picker freezes the melody, opening the buffer
+    gate re-arms the activity window, and the ^X list highlights the timbre
+    that actually sounds."""
+
+    start_screen = "freeplay"
+
+    def setUp(self):
+        super().setUp()
+        self.engine.realtime = True
+        self.engine.preload = mock.Mock()
+        self.engine.is_preloaded = mock.Mock(return_value=False)
+        self.engine.preload_status = mock.Mock(return_value=(True, 0, 8))
+
+    def _start_prenatal(self, sid="fur_elise"):
+        self.cfg.prenatal_song = sid
+        self.press("ctrl+t")
+        return self.screen.player
+
+    def _open_gate(self):
+        self.engine.is_preloaded.return_value = True
+        self.engine.preload_status.return_value = (False, 8, 8)
+
+    def test_leaving_to_the_song_picker_pauses_the_melody(self):
+        p = self._start_prenatal()
+        self._open_gate()
+        self.press("q")
+        self.step()
+        self.assertTrue(p.playing)
+        self.press("ctrl+a")
+        self.assertEqual(self.app.current_name, "song_select")
+        self.assertFalse(p.playing)     # frozen offscreen, not silently running
+        self.press("esc")
+        self.step()
+        self.assertEqual(self.app.current_name, "freeplay")
+        self.assertTrue(p.playing)      # resumes from the frozen position
+
+    def test_leaving_to_the_timbre_picker_pauses_the_melody(self):
+        p = self._start_prenatal()
+        self._open_gate()
+        self.press("q")
+        self.step()
+        self.assertTrue(p.playing)
+        self.press("ctrl+x")
+        self.assertEqual(self.app.current_name, "timbre_select")
+        self.assertFalse(p.playing)
+
+    def test_opening_the_gate_rearms_the_activity_window(self):
+        p = self._start_prenatal()
+        self.press("q")                 # asks for playback; the gate is shut
+        # The gate's wait used to eat the 2 s activity window: opening it
+        # paused the melody on that very frame, with nothing to re-arm it.
+        self.screen.last_activity = self.screen.clock - 5.0
+        self._open_gate()
+        self.step()
+        self.assertFalse(self.screen._waiting)
+        self.assertTrue(p.playing)
+
+    def test_the_timbre_picker_highlights_the_song_locked_timbre(self):
+        self._start_prenatal("canon")
+        self.press("ctrl+x")
+        self.assertEqual(self.app.current_name, "timbre_select")
+        # Canon locks the didgeridoo; the list must not highlight harp.
+        self.assertEqual(self.app.current.index,
+                         synth.ORDER.index(songs.SONGS["canon"].timbre))
 
 
 if __name__ == "__main__":

@@ -8,10 +8,30 @@ import threading
 import time
 import unittest
 import wave
+from contextlib import contextmanager
+from unittest import mock
 
 from tmb.audio import synth
 from tmb.audio.backends import NullBackend, WavBackend
 from tmb.audio.engine import AudioEngine, CACHE_LIMIT, Voice, assemble_oneshot
+
+
+@contextmanager
+def captured_thread_errors():
+    """Collect uncaught thread exceptions instead of letting pytest warn.
+
+    The failing-render tests below drive the preload thread's exception path
+    on purpose: the traceback is the only diagnostic signal, and pytest turns
+    it into a warning. Collecting the hook keeps the suite clean and lets the
+    test prove the thread really died on the render error.
+    """
+    sink = []
+    previous = threading.excepthook
+    threading.excepthook = lambda args: sink.append(args.exc_value)
+    try:
+        yield sink
+    finally:
+        threading.excepthook = previous
 
 
 def peak(buf) -> float:
@@ -270,7 +290,6 @@ class Preload(unittest.TestCase):
     def test_a_newer_preload_supersedes_the_running_one(self):
         # Hold the first request's render open until the newer request has
         # been issued: supersede must stop it after the one in-flight note.
-        from unittest import mock
         release = threading.Event()
         harp = synth.get_timbre("harp")
         original = harp.render
@@ -295,7 +314,6 @@ class Preload(unittest.TestCase):
         oldest notes: the preload reported done == total, yet is_preloaded()
         stayed false forever, so clicking the song never entered the game.
         """
-        from unittest import mock
         score = tuple(range(60, 68))  # 8 keys: exactly CACHE_LIMIT here
         other = (72, 74)
         with mock.patch("tmb.audio.engine.CACHE_LIMIT", 8), \
@@ -310,7 +328,6 @@ class Preload(unittest.TestCase):
             self.assertTrue(self.eng.is_preloaded("bit", score))
 
     def test_request_bigger_than_cache_trims_back_afterwards(self):
-        from unittest import mock
         score = tuple(range(60, 68))  # wider than the patched limit
         with mock.patch("tmb.audio.engine.CACHE_LIMIT", 8), \
                 mock.patch.dict(os.environ, {"TMB_NO_MP": "1"}):
@@ -331,6 +348,162 @@ class Preload(unittest.TestCase):
         self.eng.preload("bit", (62,))
         self.assertTrue(self._wait_cache(("bit", 62)))
         self.assertTrue(self.eng.is_preloaded("bit", (60, 62)))
+
+    def test_a_worker_that_drops_a_stale_task_is_not_cached(self):
+        """worker 端代际检查返回 None 时，绝不能把 None 当成缓冲区存进缓存。"""
+        import tmb.audio.engine as E
+
+        class Fut:
+            def get(self, timeout=None):
+                return None          # worker saw a newer generation
+
+        class Pool:
+            def apply_async(self, fn, args, error_callback=None):
+                return Fut()
+
+        with mock.patch.object(E, "_get_pool", lambda: Pool()):
+            self.eng._preload_parallel("bit", (60, 62), gen=self.eng._preload_gen)
+        self.assertEqual(self.eng._cache, {})
+
+    def test_a_superseded_parallel_request_stops_submitting(self):
+        """过期请求最多只浪费一个窗口的渲染，而不是整批。"""
+        import tmb.audio.engine as E
+
+        class Fut:
+            def __init__(self, eng):
+                self.eng = eng
+                self.first = True
+
+            def get(self, timeout=None):
+                if self.first:
+                    self.first = False
+                    with self.eng._preload_lock:
+                        self.eng._preload_gen += 1   # 更新的请求到了
+                return synth.NoteBuffers(oneshot=synth.zeros(8))
+
+        class Pool:
+            def __init__(self, eng):
+                self.eng = eng
+                self.submitted = []
+
+            def apply_async(self, fn, args, error_callback=None):
+                self.submitted.append(args[0])
+                return Fut(self.eng)
+
+        pool = Pool(self.eng)
+        with mock.patch.object(E, "_get_pool", lambda: pool):
+            self.eng._preload_parallel("bit", tuple(range(60, 72)), gen=self.eng._preload_gen)
+        self.assertEqual(len(pool.submitted), E._mp_workers())
+
+    def test_a_render_that_raises_releases_the_pinned_request(self):
+        """渲染抛异常也不能把 _preload_tid / _pinned 永久留住。"""
+        import tmb.audio.engine as E
+
+        class Bad:
+            sustain = False
+
+            def render(self, midi):
+                raise RuntimeError("boom")
+
+        with captured_thread_errors() as errors:
+            with mock.patch.object(E, "get_timbre", lambda tid: Bad()), \
+                    mock.patch.dict(os.environ, {"TMB_NO_MP": "1"}):
+                self.eng.preload("bit", (60, 62))
+                done, total = self._wait_idle()
+            deadline = time.monotonic() + 2.0
+            while not errors and time.monotonic() < deadline:
+                time.sleep(0.01)          # the hook fires as the thread dies
+        self.assertEqual(len(errors), 1)  # 异常确实冒到线程钩子（诊断信号还在）
+        self.assertIsInstance(errors[0], RuntimeError)
+        self.assertIsNone(self.eng._preload_tid)
+        self.assertIsNone(self.eng._pinned)
+        self.assertEqual((done, total), (2, 2))   # 标记完成 -> healing 可重试
+        self.assertFalse(self.eng.is_preloaded("bit", (60, 62)))
+
+    def test_a_parallel_failure_fallback_does_not_overcount(self):
+        """串行兜底不能把已缓存的键再数一遍：done 必须停在 total。"""
+        import tmb.audio.engine as E
+
+        class Fut:
+            def __init__(self, i):
+                self.i = i
+
+            def get(self, timeout=None):
+                if self.i >= 3:
+                    raise RuntimeError("worker died")
+                return synth.NoteBuffers(oneshot=synth.zeros(8))
+
+        class Pool:
+            def __init__(self):
+                self.n = 0
+
+            def apply_async(self, fn, args, error_callback=None):
+                self.n += 1
+                return Fut(self.n)
+
+        keys = tuple(range(60, 68))
+        with mock.patch.object(E, "_mp_enabled", lambda: True), \
+                mock.patch.object(E, "_get_pool", lambda: Pool()):
+            self.eng.preload("bit", keys)
+            done, total = self._wait_idle()
+        self.assertEqual((done, total), (8, 8))
+        self.assertTrue(self.eng.is_preloaded("bit", keys))
+
+    def test_a_request_wider_than_the_cache_still_opens_the_gate(self):
+        """请求比上限宽时，裁掉的只能是别的键，不能是请求自己。"""
+        score = tuple(range(60, 72))              # 12 键 > 上限 8
+        with mock.patch("tmb.audio.engine.CACHE_LIMIT", 8), \
+                mock.patch.dict(os.environ, {"TMB_NO_MP": "1"}):
+            self.eng.preload("bit", score)
+            self._wait_idle()
+            self.assertTrue(self.eng.is_preloaded("bit", score))
+            self.assertGreater(len(self.eng._cache), 8)
+            self.eng.preload("xylophone", (72,))
+            self._wait_idle()
+            self.assertLessEqual(len(self.eng._cache), 8)
+
+    def test_an_insert_restores_the_bound_after_a_wide_request(self):
+        """超宽请求过后，一次普通插入要把缓存收回上限，而不是原地换一条。"""
+        score = tuple(range(60, 72))              # 12 键 > 上限 8
+        with mock.patch("tmb.audio.engine.CACHE_LIMIT", 8), \
+                mock.patch.dict(os.environ, {"TMB_NO_MP": "1"}):
+            self.eng.preload("bit", score)
+            self._wait_idle()
+            self.assertGreater(len(self.eng._cache), 8)
+            self.eng._buffers("bit", 90)          # one cold insert
+            self.assertLessEqual(len(self.eng._cache), 8)
+
+    def test_a_failed_request_cools_down_before_the_next_retry(self):
+        """healing 每帧重发时，坏渲染只能按冷却重试，不能每帧起一条线程。"""
+        import tmb.audio.engine as E
+
+        class Bad:
+            sustain = False
+            calls = 0
+
+            def render(self, midi):
+                Bad.calls += 1
+                raise RuntimeError("boom")
+
+        with captured_thread_errors() as errors:
+            with mock.patch.object(E, "get_timbre", lambda tid: Bad()), \
+                    mock.patch.dict(os.environ, {"TMB_NO_MP": "1"}):
+                self.eng.preload("bit", (60, 62))
+                self._wait_idle()
+                self.assertEqual(Bad.calls, 2)    # 串行一次 + 内联兜底一次
+                # 下一帧 healing 又来了：冷却期内部开启新线程。
+                self.eng.preload("bit", (60, 62))
+                self.assertIsNone(self.eng._preload_tid)
+                self.assertEqual(Bad.calls, 2)
+                # 冷却结束后允许重试。
+                self.eng._preload_fail_at -= E.FAIL_RETRY_DELAY
+                self.eng.preload("bit", (60, 62))
+                self._wait_idle()
+                self.assertEqual(Bad.calls, 4)
+            deadline = time.monotonic() + 2.0
+            while len(errors) < 2 and time.monotonic() < deadline:
+                time.sleep(0.01)
+        self.assertGreaterEqual(len(errors), 2)   # 两次失败都冒到线程钩子
 
 
 class AdaptiveMix(unittest.TestCase):
@@ -443,6 +616,64 @@ class WavMixer(unittest.TestCase):
         peak = pcm_peak(self.read_wav())
         self.assertGreater(peak, int(0.55 * 32767))
         self.assertLess(peak, int(0.75 * 32767))
+
+
+
+
+class StopCleanup(unittest.TestCase):
+    """Stops must end clean: no full-scale burst after a fade completes
+    mid-chunk (E1), a never-started scheduled note must not sound after a
+    stop (E2), and a key-up mid-attack must not step to steady[0] (E3)."""
+
+    def setUp(self):
+        self.eng = AudioEngine(backend=NullBackend(), realtime=False)
+
+    def test_a_fade_ending_mid_chunk_stays_silent_to_the_end(self):
+        # 120 ms at 44100 Hz = 5292 frames = 10.34 chunks: the ramp ends
+        # inside the 11th 512-frame chunk. Everything after the ramp in that
+        # chunk used to keep the buffer's own amplitude - a short full-scale
+        # burst at the end of every stop, pause and screen switch.
+        buf = array.array("f", [0.5] * 8192)
+        v = Voice([(buf, False)])
+        v.fade_out(5292)
+        chunks = [v.pull(512) for _ in range(11)]
+        self.assertTrue(v.done)
+        final = chunks[-1]
+        self.assertGreater(peak(final[:172]), 0.0)   # the ramp itself sounds
+        self.assertEqual(peak(final[172:]), 0.0)     # the tail is silence
+
+    def test_stop_all_cancels_a_note_that_has_not_started_yet(self):
+        # Notes are handed to the engine up to SCHEDULE_LOOKAHEAD early; a
+        # stop during that window used to let the note start afterwards and
+        # fade out audibly (120 ms of a note that should never have sounded).
+        self.eng.play_note("harp", 60, 0.5, delay=2000)
+        self.eng.stop_all(120.0)
+        self.assertEqual(self.eng.active(), 0)
+        self.assertEqual(len(self.eng._fading), 1)
+        v = self.eng._fading[0]
+        for _ in range(6):
+            self.assertEqual(peak(v.pull(512)), 0.0)
+        self.assertTrue(v.done)
+
+    def test_key_up_during_the_attack_splices_the_attack_into_the_tail(self):
+        # Flute's attack runs ~61 ms; a key-up inside it used to jump from
+        # the attack's current phase straight to steady[0] - a step of up to
+        # ~0.8 amplitude. The tail now continues the attack's own samples
+        # first, so the key-up sample is as smooth as the note itself.
+        vid = self.eng.note_on("flute", 60)
+        v = self.eng._voices[vid]
+        atk = v._segments[0][0]
+        self.assertGreater(len(atk), 512)
+        n = len(atk) // 2
+        pre = v.pull(n)
+        self.eng.note_off(vid)
+        post = v.pull(512)
+        # The tail's head is literally the attack's next samples (the release
+        # fade's head weight is ~1.0), so the step stays a natural one.
+        self.assertAlmostEqual(post[0], atk[n], delta=0.01)
+        self.assertAlmostEqual(post[3], atk[n + 3], delta=0.01)
+        self.assertLess(abs(post[0] - pre[-1]), 0.15)
+        self.assertGreater(peak(post[:64]), 0.01)    # and it still sounds
 
 
 if __name__ == "__main__":
